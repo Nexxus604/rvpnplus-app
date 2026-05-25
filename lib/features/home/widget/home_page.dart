@@ -61,6 +61,12 @@ class HomePage extends HookConsumerWidget {
           //     material: (context, platform) => MaterialIconButtonData(
           //           tooltip: t.profile.add.buttonText,
           //         )),
+          // R-VPN+ servers shortcut.
+          IconButton(
+            tooltip: 'Серверы',
+            icon: Icon(Icons.public, color: theme.colorScheme.primary),
+            onPressed: () => GoRouter.of(context).push('/servers'),
+          ),
           // R-VPN+ account shortcut.
           IconButton(
             tooltip: 'Аккаунт',

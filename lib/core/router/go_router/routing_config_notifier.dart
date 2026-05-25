@@ -11,6 +11,7 @@ import 'package:hiddify/features/account/widget/account_page.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/auth/widget/email_input_page.dart';
 import 'package:hiddify/features/auth/widget/otp_input_page.dart';
+import 'package:hiddify/features/devices/widget/devices_page.dart';
 import 'package:hiddify/features/home/widget/home_page.dart';
 import 'package:hiddify/features/intro/widget/intro_page.dart';
 import 'package:hiddify/features/log/overview/logs_page.dart';
@@ -19,6 +20,7 @@ import 'package:hiddify/features/profile/details/profile_details_page.dart';
 import 'package:hiddify/features/profile/notifier/active_profile_notifier.dart';
 import 'package:hiddify/features/profile/overview/profiles_page.dart';
 import 'package:hiddify/features/proxy/overview/proxies_overview_page.dart';
+import 'package:hiddify/features/servers/widget/servers_page.dart';
 import 'package:hiddify/features/settings/overview/sections/dns_options_page.dart';
 import 'package:hiddify/features/settings/overview/sections/general_page.dart';
 import 'package:hiddify/features/settings/overview/sections/inbound_options_page.dart';
@@ -277,6 +279,8 @@ class RoutingConfigNotifier extends _$RoutingConfigNotifier {
         GoRoute(name: 'authEmail', path: '/auth/email', builder: (_, _) => const EmailInputPage()),
         GoRoute(name: 'authOtp', path: '/auth/otp', builder: (_, _) => const OtpInputPage()),
         GoRoute(name: 'account', path: '/account', builder: (_, _) => const AccountPage()),
+        GoRoute(name: 'devices', path: '/account/devices', builder: (_, _) => const DevicesPage()),
+        GoRoute(name: 'servers', path: '/servers', builder: (_, _) => const ServersPage()),
       ],
     );
   }
