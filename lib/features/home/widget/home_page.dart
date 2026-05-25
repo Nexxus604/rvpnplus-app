@@ -1,6 +1,7 @@
 import 'package:dartx/dartx.dart';
 import 'package:flutter/material.dart';
 import 'package:gap/gap.dart';
+import 'package:go_router/go_router.dart';
 import 'package:hiddify/core/app_info/app_info_provider.dart';
 import 'package:hiddify/core/localization/translations.dart';
 import 'package:hiddify/core/router/bottom_sheets/bottom_sheets_notifier.dart';
@@ -60,6 +61,12 @@ class HomePage extends HookConsumerWidget {
           //     material: (context, platform) => MaterialIconButtonData(
           //           tooltip: t.profile.add.buttonText,
           //         )),
+          // R-VPN+ account shortcut.
+          IconButton(
+            tooltip: 'Аккаунт',
+            icon: Icon(Icons.account_circle, color: theme.colorScheme.primary),
+            onPressed: () => GoRouter.of(context).push('/account'),
+          ),
           Semantics(
             key: const ValueKey("profile_quick_settings"),
             label: t.pages.home.quickSettings,

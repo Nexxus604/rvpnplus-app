@@ -7,6 +7,7 @@ import 'package:hiddify/core/router/go_router/helper/active_breakpoint_notifier.
 import 'package:hiddify/core/router/go_router/helper/custom_transition.dart';
 import 'package:hiddify/core/router/go_router/refresh_listenable.dart';
 import 'package:hiddify/features/about/widget/about_page.dart';
+import 'package:hiddify/features/account/widget/account_page.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/auth/widget/email_input_page.dart';
 import 'package:hiddify/features/auth/widget/otp_input_page.dart';
@@ -275,6 +276,7 @@ class RoutingConfigNotifier extends _$RoutingConfigNotifier {
         GoRoute(name: 'intro', path: '/intro', builder: (_, _) => const IntroPage()),
         GoRoute(name: 'authEmail', path: '/auth/email', builder: (_, _) => const EmailInputPage()),
         GoRoute(name: 'authOtp', path: '/auth/otp', builder: (_, _) => const OtpInputPage()),
+        GoRoute(name: 'account', path: '/account', builder: (_, _) => const AccountPage()),
       ],
     );
   }

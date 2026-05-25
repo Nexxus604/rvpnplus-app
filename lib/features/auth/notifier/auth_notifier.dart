@@ -11,7 +11,15 @@
 //     / DPAPI / libsecret) — see [SecureTokenStore].
 //   - account_id + email:    shared_preferences. Not secrets, and faster
 //     cold-start read than secure storage.
+//
+// Boot flow (TZ §5.5):
+//   1. Load persisted tokens + cached account from storage.
+//   2. If present → state = AuthAuthenticated (cached values).
+//   3. Probe /v1/account asynchronously to refresh data + validate token.
+//   4. On 401 → attempt /v1/auth/refresh; on success retry probe.
+//   5. On refresh failure → logout (state → AuthUnauthenticated).
 
+import 'package:hiddify/core/api/account_api.dart';
 import 'package:hiddify/core/api/auth_api.dart';
 import 'package:hiddify/core/auth/secure_token_store.dart';
 import 'package:hiddify/core/device/device_info_collector.dart';
@@ -44,13 +52,29 @@ class AuthPendingOtp extends AuthState {
 
 class AuthAuthenticated extends AuthState {
   final Account account;
+  final SubscriptionSummary? subscription;
   final String accessToken;
   final String refreshToken;
   const AuthAuthenticated({
     required this.account,
     required this.accessToken,
     required this.refreshToken,
+    this.subscription,
   });
+
+  AuthAuthenticated copyWith({
+    Account? account,
+    SubscriptionSummary? subscription,
+    String? accessToken,
+    String? refreshToken,
+  }) {
+    return AuthAuthenticated(
+      account: account ?? this.account,
+      subscription: subscription ?? this.subscription,
+      accessToken: accessToken ?? this.accessToken,
+      refreshToken: refreshToken ?? this.refreshToken,
+    );
+  }
 }
 
 const _kAccountEmailKey = 'app_auth_account_email';
@@ -59,32 +83,60 @@ const _kAccountIdKey = 'app_auth_account_id';
 class AuthNotifier extends Notifier<AuthState> {
   @override
   AuthState build() {
-    _loadPersisted();
+    _bootstrap();
     return const AuthInitial();
   }
 
-  Future<void> _loadPersisted() async {
+  /// Called once on app start: load persisted tokens, hydrate state with
+  /// cached Account, then validate against /v1/account.
+  Future<void> _bootstrap() async {
     final store = ref.read(secureTokenStoreProvider);
     final tokens = await store.read();
     final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString(_kAccountEmailKey);
-    final id = prefs.getInt(_kAccountIdKey);
-    if (tokens != null && email != null && id != null) {
-      // TODO(next chunk): probe /v1/account on boot; on 401, attempt
-      // refresh; on refresh failure, fall to AuthUnauthenticated.
-      state = AuthAuthenticated(
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        account: Account(
-          id: id,
-          email: email,
-          emailVerified: true,
-          locale: 'ru',
-          hasTelegram: false,
-        ),
-      );
-    } else {
+    final cachedEmail = prefs.getString(_kAccountEmailKey);
+    final cachedId = prefs.getInt(_kAccountIdKey);
+
+    if (tokens == null || cachedEmail == null || cachedId == null) {
       state = const AuthUnauthenticated();
+      return;
+    }
+
+    // Optimistic: assume cached data is good. Router shows /home.
+    state = AuthAuthenticated(
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      account: Account(
+        id: cachedId,
+        email: cachedEmail,
+        emailVerified: true,
+        locale: 'ru',
+        hasTelegram: false,
+      ),
+    );
+
+    // Validate + refresh details in the background.
+    await _probeAccount();
+  }
+
+  /// Calls /v1/account; on 401 tries refresh once.
+  Future<void> _probeAccount() async {
+    final current = state;
+    if (current is! AuthAuthenticated) return;
+    try {
+      final details =
+          await ref.read(accountApiProvider).get(accessToken: current.accessToken);
+      state = current.copyWith(
+        account: details.account,
+        subscription: details.subscription,
+      );
+    } on AccountApiException catch (e) {
+      if (e.code == AccountErrorCode.unauthorized) {
+        final refreshed = await refreshAccess();
+        if (refreshed) {
+          await _probeAccount();
+        }
+      }
+      // network / unknown — keep cached state; user sees offline-ish UI.
     }
   }
 
@@ -123,6 +175,8 @@ class AuthNotifier extends Notifier<AuthState> {
         accessToken: result.accessToken,
         refreshToken: result.refreshToken,
       );
+      // Pull subscription data immediately.
+      unawaited(_probeAccount());
     } on AuthApiException catch (e) {
       state = AuthPendingOtp(
         email: current.email,
@@ -147,8 +201,7 @@ class AuthNotifier extends Notifier<AuthState> {
         accountId: current.account.id,
         accountEmail: current.account.email,
       );
-      state = AuthAuthenticated(
-        account: current.account,
+      state = current.copyWith(
         accessToken: result.accessToken,
         refreshToken: result.refreshToken,
       );
@@ -186,6 +239,14 @@ class AuthNotifier extends Notifier<AuthState> {
     await prefs.setString(_kAccountEmailKey, accountEmail);
     await prefs.setInt(_kAccountIdKey, accountId);
   }
+}
+
+// Lightweight fire-and-forget helper without a hard dependency on
+// dart:async (it's already in core, but kept inline for clarity).
+void unawaited(Future<void> f) {
+  f.catchError((_) {
+    // Errors handled inside _probeAccount; no rethrow here.
+  });
 }
 
 final authNotifierProvider = NotifierProvider<AuthNotifier, AuthState>(
