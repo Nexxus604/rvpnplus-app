@@ -7,6 +7,9 @@ import 'package:hiddify/core/router/go_router/helper/active_breakpoint_notifier.
 import 'package:hiddify/core/router/go_router/helper/custom_transition.dart';
 import 'package:hiddify/core/router/go_router/refresh_listenable.dart';
 import 'package:hiddify/features/about/widget/about_page.dart';
+import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
+import 'package:hiddify/features/auth/widget/email_input_page.dart';
+import 'package:hiddify/features/auth/widget/otp_input_page.dart';
 import 'package:hiddify/features/home/widget/home_page.dart';
 import 'package:hiddify/features/intro/widget/intro_page.dart';
 import 'package:hiddify/features/log/overview/logs_page.dart';
@@ -64,7 +67,10 @@ class RoutingConfigNotifier extends _$RoutingConfigNotifier {
     return RoutingConfig(
       redirect: (context, state) {
         final introCompleted = ref.read(Preferences.introCompleted);
-        final isIntro = state.matchedLocation == '/intro';
+        final authState = ref.read(authNotifierProvider);
+        final location = state.matchedLocation;
+        final isIntro = location == '/intro';
+        final isAuth = location.startsWith('/auth');
         // fix path-parameters for deep link
         String? url;
         if (LinkParser.protocols.contains(state.uri.scheme)) {
@@ -76,15 +82,35 @@ class RoutingConfigNotifier extends _$RoutingConfigNotifier {
           url = state.uri.queryParameters['url'];
         }
 
+        // 1. Intro first.
         if (!introCompleted) {
+          if (isIntro) return null;
           return url != null ? '/intro?url=$url' : '/intro';
-        } else if (isIntro) {
-          if (url != null)
+        }
+
+        // 2. Auth wall once intro is done.
+        if (authState is AuthInitial) {
+          // Boot — keep current location until persisted token loads.
+          return null;
+        }
+        if (authState is AuthUnauthenticated) {
+          return location == '/auth/email' ? null : '/auth/email';
+        }
+        if (authState is AuthPendingOtp) {
+          return location == '/auth/otp' ? null : '/auth/otp';
+        }
+        // authState is AuthAuthenticated — bounce intro/auth back home.
+        if (isIntro || isAuth) {
+          if (url != null) {
             WidgetsBinding.instance.addPostFrameCallback(
               (_) => ref.read(bottomSheetsNotifierProvider.notifier).showAddProfile(url: url),
             );
+          }
           return '/home';
-        } else if (url != null) {
+        }
+
+        // Deep link arriving on a regular tab — process side-effect.
+        if (url != null) {
           WidgetsBinding.instance.addPostFrameCallback(
             (_) => ref.read(bottomSheetsNotifierProvider.notifier).showAddProfile(url: url),
           );
@@ -247,6 +273,8 @@ class RoutingConfigNotifier extends _$RoutingConfigNotifier {
           ],
         ),
         GoRoute(name: 'intro', path: '/intro', builder: (_, _) => const IntroPage()),
+        GoRoute(name: 'authEmail', path: '/auth/email', builder: (_, _) => const EmailInputPage()),
+        GoRoute(name: 'authOtp', path: '/auth/otp', builder: (_, _) => const OtpInputPage()),
       ],
     );
   }
