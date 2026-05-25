@@ -1,9 +1,8 @@
 // Typed client for /v1/auth/* endpoints on api.rvpn.app.
-//
-// Phase 1 chunk 2 — wraps the Dio instance from app_api.dart.
 
 import 'package:dio/dio.dart';
 import 'package:hiddify/core/api/app_api.dart';
+import 'package:hiddify/core/device/device_info_collector.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 class Account {
@@ -30,15 +29,45 @@ class Account {
       );
 }
 
+class DeviceInfo {
+  final int id;
+  final String? name;
+  final String platform;
+
+  const DeviceInfo({required this.id, required this.platform, this.name});
+
+  factory DeviceInfo.fromJson(Map<String, dynamic> json) => DeviceInfo(
+        id: json['id'] as int,
+        platform: json['platform'] as String,
+        name: json['name'] as String?,
+      );
+}
+
 class VerifyResult {
   final String accessToken;
+  final String refreshToken;
   final int expiresIn;
   final Account account;
+  final DeviceInfo device;
 
   const VerifyResult({
     required this.accessToken,
+    required this.refreshToken,
     required this.expiresIn,
     required this.account,
+    required this.device,
+  });
+}
+
+class RefreshResult {
+  final String accessToken;
+  final String refreshToken;
+  final int expiresIn;
+
+  const RefreshResult({
+    required this.accessToken,
+    required this.refreshToken,
+    required this.expiresIn,
   });
 }
 
@@ -48,6 +77,8 @@ enum AuthErrorCode {
   otpExpired,
   otpExhausted,
   emailSendFailed,
+  refreshInvalid,
+  accountInactive,
   network,
   unknown,
 }
@@ -84,19 +115,47 @@ class AuthApi {
   Future<VerifyResult> verifyOtp({
     required String email,
     required String code,
+    required DeviceInfoPayload device,
     String purpose = 'login',
   }) async {
     try {
       final response = await _dio.post<Map<String, dynamic>>(
         '/auth/otp/verify',
-        data: {'email': email, 'code': code, 'purpose': purpose},
+        data: {
+          'email': email,
+          'code': code,
+          'purpose': purpose,
+          'device': device.toJson(),
+        },
       );
       if (response.statusCode == 200) {
         final data = response.data!;
         return VerifyResult(
           accessToken: data['access_token'] as String,
+          refreshToken: data['refresh_token'] as String,
           expiresIn: data['expires_in'] as int,
           account: Account.fromJson(data['account'] as Map<String, dynamic>),
+          device: DeviceInfo.fromJson(data['device'] as Map<String, dynamic>),
+        );
+      }
+      throw _mapError(response.statusCode, response.data);
+    } on DioException catch (e) {
+      throw AuthApiException(AuthErrorCode.network, e.message ?? 'Network error');
+    }
+  }
+
+  Future<RefreshResult> refresh({required String refreshToken}) async {
+    try {
+      final response = await _dio.post<Map<String, dynamic>>(
+        '/auth/refresh',
+        data: {'refresh_token': refreshToken},
+      );
+      if (response.statusCode == 200) {
+        final data = response.data!;
+        return RefreshResult(
+          accessToken: data['access_token'] as String,
+          refreshToken: data['refresh_token'] as String,
+          expiresIn: data['expires_in'] as int,
         );
       }
       throw _mapError(response.statusCode, response.data);
@@ -119,6 +178,8 @@ class AuthApi {
       'OTP_EXPIRED' => AuthErrorCode.otpExpired,
       'OTP_EXHAUSTED' => AuthErrorCode.otpExhausted,
       'EMAIL_SEND_FAILED' => AuthErrorCode.emailSendFailed,
+      'REFRESH_INVALID' => AuthErrorCode.refreshInvalid,
+      'ACCOUNT_INACTIVE' => AuthErrorCode.accountInactive,
       _ => AuthErrorCode.unknown,
     };
     return AuthApiException(code, message);

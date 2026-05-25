@@ -161,14 +161,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.0.4"
-  build_modules:
-    dependency: transitive
-    description:
-      name: build_modules
-      sha256: "8a605a996691e79c5d81d9051e849680917157e27bd655b9cd2c5bb8019a432e"
-      url: "https://pub.dev"
-    source: hosted
-    version: "5.1.5"
   build_resolvers:
     dependency: transitive
     description:
@@ -197,10 +189,10 @@ packages:
     dependency: "direct dev"
     description:
       name: build_web_compilers
-      sha256: "37b1e61ae004124bfbb49079f73ee548d216acc901a58e65b0ffe02baa21cb96"
+      sha256: "8da0c6e1e2edaa13601846c0b4782e133a14dc4861932f561e3919f4aba460d1"
       url: "https://pub.dev"
     source: hosted
-    version: "4.4.6"
+    version: "4.6.0"
   built_collection:
     dependency: transitive
     description:
@@ -419,7 +411,7 @@ packages:
     source: hosted
     version: "5.0.2"
   device_info_plus:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: device_info_plus
       sha256: "0c6396126421b590089447154c5f98a5de423b70cfb15b1578fd018843ee6f53"
@@ -1515,10 +1507,10 @@ packages:
     dependency: transitive
     description:
       name: scratch_space
-      sha256: "3417e014d20b12cebc5bfb1c0b1f63806054177158596cc31cc4d9aaca767a60"
+      sha256: "564e4d0cef547454171ce97b1ea3ec70fa9bc5b3b9db896a620dd5930dc5e8b8"
       url: "https://pub.dev"
     source: hosted
-    version: "1.2.0"
+    version: "1.2.1"
   screen_retriever:
     dependency: "direct main"
     description:
@@ -2165,5 +2157,5 @@ packages:
     source: hosted
     version: "2.2.2"
 sdks:
-  dart: ">=3.10.4 <3.12.0-z"
+  dart: ">=3.10.4 <3.13.0-z"
   flutter: ">=3.38.5 <4.0.0"
