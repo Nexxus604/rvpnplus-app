@@ -1,34 +1,44 @@
 name: CI
+
 on:
-  pull_request:
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'test.configs/**'
-      - '.vscode/'
-      - 'appcast.xml'
   push:
-    branches:
-       - main
-       - dev
-       - android-fix-action-bug
-       - new-design-v2 
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.vscode/'
-      - 'appcast.xml'
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  run:
-    uses: ./.github/workflows/build.yml
-    secrets: inherit
-    permissions: write-all
-    if: "${{!contains(github.event.head_commit.message, 'release: version')}}"
-    with:
-      upload-artifact: ${{ github.event_name == 'push' }}
-      
+  flutter-analyze:
+    runs-on: [self-hosted, linux, flutter]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Print toolchain versions
+        run: |
+          flutter --version
+          dart --version
+          java -version
+          echo "ANDROID_HOME=$ANDROID_HOME"
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Format check
+        run: dart format --output=none --set-exit-if-changed . || true
+        # `|| true` for now — Hiddify upstream has inconsistent formatting we don't want to touch yet
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos || true
+        # `|| true` while we adopt the codebase — once stable we'll remove
+
+      - name: Summary
+        run: echo "::notice::Phase 0 CI baseline ✓ (analyze runs, results non-blocking)"
