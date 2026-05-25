@@ -4,7 +4,16 @@ import 'package:dio/dio.dart';
 import 'package:hiddify/core/api/app_api.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
-enum NodesErrorCode { unauthorized, network, unknown }
+enum NodesErrorCode {
+  unauthorized,
+  notFound,
+  notProvisioned,
+  bindTelegram,
+  noSubscription,
+  panelUnconfigured,
+  network,
+  unknown,
+}
 
 class NodesApiException implements Exception {
   final NodesErrorCode code;
@@ -47,6 +56,33 @@ class NodeItem {
       );
 }
 
+class NodeConfig {
+  final int nodeId;
+  final String nodeCode;
+  final String configUrl;        // default — sing-box
+  final String configUrlSingbox;
+  final String configUrlClash;
+  final String configUrlV2ray;
+
+  const NodeConfig({
+    required this.nodeId,
+    required this.nodeCode,
+    required this.configUrl,
+    required this.configUrlSingbox,
+    required this.configUrlClash,
+    required this.configUrlV2ray,
+  });
+
+  factory NodeConfig.fromJson(Map<String, dynamic> json) => NodeConfig(
+        nodeId: json['node_id'] as int,
+        nodeCode: json['node_code'] as String,
+        configUrl: json['config_url'] as String,
+        configUrlSingbox: json['config_url_singbox'] as String,
+        configUrlClash: json['config_url_clash'] as String,
+        configUrlV2ray: json['config_url_v2ray'] as String,
+      );
+}
+
 class NodesApi {
   final Dio _dio;
   const NodesApi(this._dio);
@@ -73,6 +109,46 @@ class NodesApi {
       throw NodesApiException(
           NodesErrorCode.network, e.message ?? 'Network error');
     }
+  }
+
+  Future<NodeConfig> getConfig({
+    required String accessToken,
+    required int nodeId,
+  }) async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/nodes/$nodeId/config',
+        options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+      );
+      if (response.statusCode == 200) {
+        return NodeConfig.fromJson(response.data!);
+      }
+      throw _mapError(response.statusCode, response.data);
+    } on DioException catch (e) {
+      throw NodesApiException(
+          NodesErrorCode.network, e.message ?? 'Network error');
+    }
+  }
+
+  NodesApiException _mapError(int? status, dynamic body) {
+    String? serverCode;
+    String message = 'Unknown';
+    if (body is Map && body['detail'] is Map) {
+      final detail = body['detail'] as Map;
+      serverCode = detail['code'] as String?;
+      message = detail['message'] as String? ?? message;
+    }
+    final code = switch (serverCode) {
+      'NODE_NOT_FOUND' => NodesErrorCode.notFound,
+      'NODE_NOT_PROVISIONED' => NodesErrorCode.notProvisioned,
+      'BIND_TELEGRAM' => NodesErrorCode.bindTelegram,
+      'NO_USER' || 'NO_SUBSCRIPTION' => NodesErrorCode.noSubscription,
+      'NODE_PANEL_UNCONFIGURED' => NodesErrorCode.panelUnconfigured,
+      _ => status == 401
+          ? NodesErrorCode.unauthorized
+          : NodesErrorCode.unknown,
+    };
+    return NodesApiException(code, message);
   }
 }
 

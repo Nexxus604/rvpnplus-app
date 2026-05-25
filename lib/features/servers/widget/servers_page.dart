@@ -11,6 +11,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:hiddify/core/api/nodes_api.dart';
+import 'package:hiddify/core/router/bottom_sheets/bottom_sheets_notifier.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
@@ -82,12 +83,12 @@ class _ServersPageState extends ConsumerState<ServersPage> {
   }
 }
 
-class _CountryGroupedList extends StatelessWidget {
+class _CountryGroupedList extends ConsumerWidget {
   final List<NodeItem> items;
   const _CountryGroupedList({required this.items});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final groups = <String, List<NodeItem>>{};
     for (final n in items) {
       groups.putIfAbsent(n.countryCode, () => []).add(n);
@@ -165,17 +166,20 @@ class _CountryGroup extends StatelessWidget {
   }
 }
 
-class _CityRow extends StatelessWidget {
+class _CityRow extends ConsumerWidget {
   final String city;
   final List<NodeItem> nodes;
   const _CityRow({required this.city, required this.nodes});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final avgLoad = nodes.isEmpty
         ? 0
         : (nodes.map((n) => n.loadPercent).reduce((a, b) => a + b) / nodes.length).round();
+    // For one-tap connect we pick the lightest-loaded node in this city.
+    final pick = [...nodes]..sort((a, b) => a.loadPercent.compareTo(b.loadPercent));
+    final preferred = pick.first;
     return ListTile(
       contentPadding: const EdgeInsets.only(left: 72, right: 16),
       title: Text(city),
@@ -186,12 +190,35 @@ class _CityRow extends StatelessWidget {
       trailing: nodes.any((n) => n.isPremium)
           ? const Icon(Icons.workspace_premium, color: Colors.amber)
           : null,
-      onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Скоро — выбор сервера и подключение')),
-        );
-      },
+      onTap: () => _onTap(context, ref, preferred),
     );
+  }
+
+  Future<void> _onTap(BuildContext context, WidgetRef ref, NodeItem node) async {
+    final auth = ref.read(authNotifierProvider);
+    if (auth is! AuthAuthenticated) return;
+    // Show transient spinner snackbar.
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(SnackBar(
+      content: Text('Получаем конфиг для ${node.code}…'),
+      duration: const Duration(seconds: 4),
+    ));
+    try {
+      final cfg = await ref.read(nodesApiProvider).getConfig(
+            accessToken: auth.accessToken,
+            nodeId: node.id,
+          );
+      messenger.hideCurrentSnackBar();
+      if (!context.mounted) return;
+      // Hand the Marzban sub URL to Hiddify's existing "Add Profile" flow.
+      await ref
+          .read(bottomSheetsNotifierProvider.notifier)
+          .showAddProfile(url: cfg.configUrlSingbox);
+    } on NodesApiException catch (e) {
+      messenger.hideCurrentSnackBar();
+      if (!context.mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text(_localiseError(e))));
+    }
   }
 }
 
@@ -222,6 +249,14 @@ class _ErrorView extends StatelessWidget {
 
 String _localiseError(NodesApiException e) => switch (e.code) {
       NodesErrorCode.unauthorized => 'Сессия истекла. Войдите заново.',
+      NodesErrorCode.notFound => 'Эта нода больше недоступна.',
+      NodesErrorCode.notProvisioned => 'Эта нода не подключена к вашей подписке. '
+          'Добавьте её через панель в Telegram-боте.',
+      NodesErrorCode.bindTelegram => 'Привяжите Telegram-аккаунт, '
+          'чтобы получить доступ к серверам.',
+      NodesErrorCode.noSubscription => 'У вас нет активной подписки. '
+          'Откройте Telegram-бот и активируйте trial.',
+      NodesErrorCode.panelUnconfigured => 'Сервер временно недоступен.',
       NodesErrorCode.network => 'Нет связи с сервером.',
       NodesErrorCode.unknown => e.message,
     };
