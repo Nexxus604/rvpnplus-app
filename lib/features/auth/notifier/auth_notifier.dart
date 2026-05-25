@@ -1,15 +1,19 @@
 // Auth state holder for the R-VPN+ app.
 //
 // State machine:
-//   AuthInitial          — boot, before we've checked persisted token
-//   AuthUnauthenticated  — no valid token; show /auth/email
+//   AuthInitial          — boot, before persisted tokens are loaded
+//   AuthUnauthenticated  — no valid token; router shows /auth/email
 //   AuthPendingOtp       — OTP sent, waiting for user to enter code
-//   AuthAuthenticated    — JWT + Account in hand; show /home
+//   AuthAuthenticated    — tokens + Account in memory; router shows /home
 //
-// Token persistence: shared_preferences for now. TODO: migrate to
-// flutter_secure_storage (Keychain/Keystore/DPAPI) — see TZ §22.2.
+// Persistence split:
+//   - JWT access + refresh:  flutter_secure_storage (Keychain / Keystore
+//     / DPAPI / libsecret) — see [SecureTokenStore].
+//   - account_id + email:    shared_preferences. Not secrets, and faster
+//     cold-start read than secure storage.
 
 import 'package:hiddify/core/api/auth_api.dart';
+import 'package:hiddify/core/auth/secure_token_store.dart';
 import 'package:hiddify/core/device/device_info_collector.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -49,8 +53,6 @@ class AuthAuthenticated extends AuthState {
   });
 }
 
-const _kAccessTokenKey = 'app_auth_access_token';
-const _kRefreshTokenKey = 'app_auth_refresh_token';
 const _kAccountEmailKey = 'app_auth_account_email';
 const _kAccountIdKey = 'app_auth_account_id';
 
@@ -62,17 +64,17 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   Future<void> _loadPersisted() async {
+    final store = ref.read(secureTokenStoreProvider);
+    final tokens = await store.read();
     final prefs = await SharedPreferences.getInstance();
-    final access = prefs.getString(_kAccessTokenKey);
-    final refresh = prefs.getString(_kRefreshTokenKey);
     final email = prefs.getString(_kAccountEmailKey);
     final id = prefs.getInt(_kAccountIdKey);
-    if (access != null && refresh != null && email != null && id != null) {
+    if (tokens != null && email != null && id != null) {
       // TODO(next chunk): probe /v1/account on boot; on 401, attempt
       // refresh; on refresh failure, fall to AuthUnauthenticated.
       state = AuthAuthenticated(
-        accessToken: access,
-        refreshToken: refresh,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
         account: Account(
           id: id,
           email: email,
@@ -152,7 +154,6 @@ class AuthNotifier extends Notifier<AuthState> {
       );
       return true;
     } on AuthApiException catch (e) {
-      // Refresh failed → wipe stored tokens, force re-login.
       await logout();
       state = AuthUnauthenticated(lastError: e.message);
       return false;
@@ -160,9 +161,8 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   Future<void> logout() async {
+    await ref.read(secureTokenStoreProvider).clear();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_kAccessTokenKey);
-    await prefs.remove(_kRefreshTokenKey);
     await prefs.remove(_kAccountEmailKey);
     await prefs.remove(_kAccountIdKey);
     state = const AuthUnauthenticated();
@@ -178,9 +178,11 @@ class AuthNotifier extends Notifier<AuthState> {
     required int accountId,
     required String accountEmail,
   }) async {
+    await ref.read(secureTokenStoreProvider).write(
+          accessToken: accessToken,
+          refreshToken: refreshToken,
+        );
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kAccessTokenKey, accessToken);
-    await prefs.setString(_kRefreshTokenKey, refreshToken);
     await prefs.setString(_kAccountEmailKey, accountEmail);
     await prefs.setInt(_kAccountIdKey, accountId);
   }
