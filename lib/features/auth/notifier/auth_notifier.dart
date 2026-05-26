@@ -9,15 +9,20 @@
 // Persistence split:
 //   - JWT access + refresh:  flutter_secure_storage (Keychain / Keystore
 //     / DPAPI / libsecret) — see [SecureTokenStore].
-//   - account_id + email:    shared_preferences. Not secrets, and faster
-//     cold-start read than secure storage.
+//   - account_id + email + email_verified + has_telegram: shared_preferences.
+//     Not secrets; faster cold-start read than secure storage.
 //
-// Boot flow (TZ §5.5):
-//   1. Load persisted tokens + cached account from storage.
-//   2. If present → state = AuthAuthenticated (cached values).
-//   3. Probe /v1/account asynchronously to refresh data + validate token.
-//   4. On 401 → attempt /v1/auth/refresh; on success retry probe.
-//   5. On refresh failure → logout (state → AuthUnauthenticated).
+// Concurrency invariants worth knowing:
+//   - `_refreshInFlight` mutex serialises all /auth/refresh attempts so
+//     two parallel callers don't both rotate the token and crash the
+//     second one with REFRESH_INVALID (reviewer F3).
+//   - Every async method re-reads `state` after `await` and bails if it
+//     no longer matches the snapshot it captured — protects against a
+//     user logging out mid-call, which would otherwise re-resurrect
+//     AuthAuthenticated with stale tokens (reviewer F2).
+//   - `_otpRequestInFlight` guards double-tap on "Get code"/"Resend".
+
+import 'dart:async';
 
 import 'package:hiddify/core/api/account_api.dart';
 import 'package:hiddify/core/api/auth_api.dart';
@@ -79,60 +84,102 @@ class AuthAuthenticated extends AuthState {
 
 const _kAccountEmailKey = 'app_auth_account_email';
 const _kAccountIdKey = 'app_auth_account_id';
+const _kAccountVerifiedKey = 'app_auth_account_email_verified';
+const _kAccountHasTgKey = 'app_auth_account_has_telegram';
 
 class AuthNotifier extends Notifier<AuthState> {
+  /// Single-flight mutex for /auth/refresh. Without it, two concurrent
+  /// API calls that both hit 401 race each other through refresh, the
+  /// second one finds the rotated token invalid, and we log the user
+  /// out unnecessarily. Reviewer F3.
+  Completer<bool>? _refreshInFlight;
+
+  /// Guard against the user double-tapping "Get code" / "Resend".
+  bool _otpRequestInFlight = false;
+
   @override
   AuthState build() {
     _bootstrap();
     return const AuthInitial();
   }
 
-  /// Called once on app start: load persisted tokens, hydrate state with
-  /// cached Account, then validate against /v1/account.
+  /// Called once on app start: load persisted tokens, hydrate state
+  /// with cached Account, then validate against /v1/account. Any
+  /// failure from secure storage falls to AuthUnauthenticated rather
+  /// than leaving the app stuck on AuthInitial forever (reviewer F5).
   Future<void> _bootstrap() async {
-    final store = ref.read(secureTokenStoreProvider);
-    final tokens = await store.read();
-    final prefs = await SharedPreferences.getInstance();
-    final cachedEmail = prefs.getString(_kAccountEmailKey);
-    final cachedId = prefs.getInt(_kAccountIdKey);
+    try {
+      final store = ref.read(secureTokenStoreProvider);
+      final tokens = await store.read();
+      final prefs = await SharedPreferences.getInstance();
+      final cachedEmail = prefs.getString(_kAccountEmailKey);
+      final cachedId = prefs.getInt(_kAccountIdKey);
+      final cachedVerified = prefs.getBool(_kAccountVerifiedKey) ?? false;
+      final cachedHasTg = prefs.getBool(_kAccountHasTgKey) ?? false;
 
-    if (tokens == null || cachedEmail == null || cachedId == null) {
-      state = const AuthUnauthenticated();
-      return;
+      // Atomicity guard: tokens without account meta = half-persisted
+      // state (crash between secure-storage and prefs writes). Wipe the
+      // orphans so cold-starts converge to a clean AuthUnauthenticated.
+      // Reviewer F6.
+      if (tokens != null && (cachedEmail == null || cachedId == null)) {
+        await store.clear();
+        state = const AuthUnauthenticated();
+        return;
+      }
+      if (tokens == null || cachedEmail == null || cachedId == null) {
+        state = const AuthUnauthenticated();
+        return;
+      }
+
+      state = AuthAuthenticated(
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        account: Account(
+          id: cachedId,
+          email: cachedEmail,
+          emailVerified: cachedVerified,
+          locale: 'ru',
+          hasTelegram: cachedHasTg,
+        ),
+      );
+      // Best-effort probe; never fatal to boot.
+      await _probeAccount();
+    } catch (e) {
+      // Keychain locked, libsecret missing on minimal Linux, corrupted
+      // prefs DB. Either way: degrade gracefully to login screen.
+      state = AuthUnauthenticated(lastError: 'Failed to restore session: $e');
     }
-
-    // Optimistic: assume cached data is good. Router shows /home.
-    state = AuthAuthenticated(
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      account: Account(
-        id: cachedId,
-        email: cachedEmail,
-        emailVerified: true,
-        locale: 'ru',
-        hasTelegram: false,
-      ),
-    );
-
-    // Validate + refresh details in the background.
-    await _probeAccount();
   }
 
-  /// Calls /v1/account; on 401 tries refresh once.
+  /// Calls /v1/account; on 401 tries refresh once. Errors that aren't
+  /// 401 are logged but don't change state (we keep the cached values
+  /// and let the user see an offline-ish UI).
   Future<void> _probeAccount() async {
     final current = state;
     if (current is! AuthAuthenticated) return;
     try {
       final details =
           await ref.read(accountApiProvider).get(accessToken: current.accessToken);
-      state = current.copyWith(
+      // Re-check the world hasn't moved during our await. If the user
+      // logged out / refresh rotated the token, our snapshot is stale
+      // and we MUST NOT write `AuthAuthenticated` back. Reviewer F2.
+      final after = state;
+      if (after is! AuthAuthenticated || after.accessToken != current.accessToken) {
+        return;
+      }
+      // Persist updated fields so the next cold start doesn't lie about
+      // emailVerified / hasTelegram. Reviewer F7.
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kAccountVerifiedKey, details.account.emailVerified);
+      await prefs.setBool(_kAccountHasTgKey, details.account.hasTelegram);
+      state = after.copyWith(
         account: details.account,
         subscription: details.subscription,
       );
     } on AccountApiException catch (e) {
       if (e.code == AccountErrorCode.unauthorized) {
         final refreshed = await refreshAccess();
-        if (refreshed) {
+        if (refreshed && state is AuthAuthenticated) {
           await _probeAccount();
         }
       }
@@ -141,13 +188,28 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   Future<void> requestOtp({required String email, String purpose = 'login'}) async {
-    state = const AuthUnauthenticated();
+    if (_otpRequestInFlight) return;
+    _otpRequestInFlight = true;
+    final pre = state;
     try {
       await ref.read(authApiProvider).requestOtp(email: email, purpose: purpose);
       state = AuthPendingOtp(email: email, purpose: purpose);
     } on AuthApiException catch (e) {
-      state = AuthUnauthenticated(lastError: e.message);
+      // Reviewer F1: don't kick the user back to /auth/email if they're
+      // already on /auth/otp resending a code that failed. Preserve the
+      // pending-otp state so the router doesn't pop the screen.
+      if (pre is AuthPendingOtp) {
+        state = AuthPendingOtp(
+          email: pre.email,
+          purpose: pre.purpose,
+          lastError: e.message,
+        );
+      } else {
+        state = AuthUnauthenticated(lastError: e.message);
+      }
       rethrow;
+    } finally {
+      _otpRequestInFlight = false;
     }
   }
 
@@ -169,6 +231,8 @@ class AuthNotifier extends Notifier<AuthState> {
         refreshToken: result.refreshToken,
         accountId: result.account.id,
         accountEmail: result.account.email,
+        emailVerified: result.account.emailVerified,
+        hasTelegram: result.account.hasTelegram,
       );
       state = AuthAuthenticated(
         account: result.account,
@@ -176,7 +240,7 @@ class AuthNotifier extends Notifier<AuthState> {
         refreshToken: result.refreshToken,
       );
       // Pull subscription data immediately.
-      unawaited(_probeAccount());
+      _safeFireAndForget(_probeAccount);
     } on AuthApiException catch (e) {
       state = AuthPendingOtp(
         email: current.email,
@@ -188,28 +252,64 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   /// Exchange the stored refresh token for a fresh access token, rotating
-  /// the refresh token in the process. Falls to Unauthenticated on failure.
+  /// the refresh token in the process. Concurrent callers share one in-
+  /// flight HTTP request (reviewer F3). On transient network failure
+  /// the session is preserved; only definitive server rejection forces
+  /// a logout (reviewer F4).
   Future<bool> refreshAccess() async {
-    final current = state;
-    if (current is! AuthAuthenticated) return false;
+    if (_refreshInFlight != null) {
+      return _refreshInFlight!.future;
+    }
+    final completer = Completer<bool>();
+    _refreshInFlight = completer;
     try {
-      final result =
-          await ref.read(authApiProvider).refresh(refreshToken: current.refreshToken);
-      await _persist(
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-        accountId: current.account.id,
-        accountEmail: current.account.email,
-      );
-      state = current.copyWith(
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-      );
-      return true;
-    } on AuthApiException catch (e) {
-      await logout();
-      state = AuthUnauthenticated(lastError: e.message);
-      return false;
+      final current = state;
+      if (current is! AuthAuthenticated) {
+        completer.complete(false);
+        return false;
+      }
+      try {
+        final result = await ref
+            .read(authApiProvider)
+            .refresh(refreshToken: current.refreshToken);
+        // Reviewer F2: bail if state moved during our await.
+        final after = state;
+        if (after is! AuthAuthenticated ||
+            after.refreshToken != current.refreshToken) {
+          completer.complete(false);
+          return false;
+        }
+        await _persist(
+          accessToken: result.accessToken,
+          refreshToken: result.refreshToken,
+          accountId: after.account.id,
+          accountEmail: after.account.email,
+          emailVerified: after.account.emailVerified,
+          hasTelegram: after.account.hasTelegram,
+        );
+        state = after.copyWith(
+          accessToken: result.accessToken,
+          refreshToken: result.refreshToken,
+        );
+        completer.complete(true);
+        return true;
+      } on AuthApiException catch (e) {
+        // Reviewer F4: only force-logout on server-side rejection. A
+        // flaky network shouldn't kick the user out — they may come
+        // back online with valid tokens still on disk.
+        if (e.code == AuthErrorCode.refreshInvalid ||
+            e.code == AuthErrorCode.accountInactive) {
+          await logout();
+          state = AuthUnauthenticated(lastError: e.message);
+          completer.complete(false);
+          return false;
+        }
+        // Network / unknown — keep state, signal caller we didn't refresh.
+        completer.complete(false);
+        return false;
+      }
+    } finally {
+      _refreshInFlight = null;
     }
   }
 
@@ -218,6 +318,8 @@ class AuthNotifier extends Notifier<AuthState> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kAccountEmailKey);
     await prefs.remove(_kAccountIdKey);
+    await prefs.remove(_kAccountVerifiedKey);
+    await prefs.remove(_kAccountHasTgKey);
     state = const AuthUnauthenticated();
   }
 
@@ -230,6 +332,8 @@ class AuthNotifier extends Notifier<AuthState> {
     required String refreshToken,
     required int accountId,
     required String accountEmail,
+    required bool emailVerified,
+    required bool hasTelegram,
   }) async {
     await ref.read(secureTokenStoreProvider).write(
           accessToken: accessToken,
@@ -238,15 +342,15 @@ class AuthNotifier extends Notifier<AuthState> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kAccountEmailKey, accountEmail);
     await prefs.setInt(_kAccountIdKey, accountId);
+    await prefs.setBool(_kAccountVerifiedKey, emailVerified);
+    await prefs.setBool(_kAccountHasTgKey, hasTelegram);
   }
-}
 
-// Lightweight fire-and-forget helper without a hard dependency on
-// dart:async (it's already in core, but kept inline for clarity).
-void unawaited(Future<void> f) {
-  f.catchError((_) {
-    // Errors handled inside _probeAccount; no rethrow here.
-  });
+  /// Fire-and-forget that swallows exceptions but at least lets dart's
+  /// zone error handling see them in debug builds.
+  void _safeFireAndForget(Future<void> Function() f) {
+    unawaited(f().catchError((Object _) {/* logged inside callee */}));
+  }
 }
 
 final authNotifierProvider = NotifierProvider<AuthNotifier, AuthState>(
