@@ -18,7 +18,11 @@ enum Release {
 
   final String key;
 
-  bool get allowCustomUpdateChecker => this == general;
+  // Disabled for R-VPN+. The upstream checker queries Hiddify-Next's
+  // GitHub releases and sends users to Hiddify's download page on
+  // "update". We re-enable this with our own checker (against
+  // api.rvpn.app /v1/version) once R-VPN+ is published to the stores.
+  bool get allowCustomUpdateChecker => false;
 
   static Release read() =>
       Release.values.firstOrNullWhere((e) => e.key == const String.fromEnvironment("release")) ?? Release.general;
