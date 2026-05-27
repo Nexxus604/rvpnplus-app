@@ -86,6 +86,28 @@ class SubscriptionApi {
   final Dio _dio;
   const SubscriptionApi(this._dio);
 
+  Future<void> deleteServer({
+    required String accessToken,
+    required int slotId,
+  }) async {
+    try {
+      final response = await _dio.delete<void>(
+        '/subscription/servers/$slotId',
+        options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+      );
+      if (response.statusCode == 204) return;
+      if (response.statusCode == 401) {
+        throw const SubscriptionApiException(
+            SubscriptionErrorCode.unauthorized, 'Access token rejected');
+      }
+      throw SubscriptionApiException(
+          SubscriptionErrorCode.unknown, 'HTTP ${response.statusCode}');
+    } on DioException catch (e) {
+      throw SubscriptionApiException(
+          SubscriptionErrorCode.network, e.message ?? 'Network error');
+    }
+  }
+
   Future<MyServersResult> myServers({required String accessToken}) async {
     try {
       final response = await _dio.get<Map<String, dynamic>>(

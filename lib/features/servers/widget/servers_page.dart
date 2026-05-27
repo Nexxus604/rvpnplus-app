@@ -9,8 +9,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:hiddify/core/api/subscription_api.dart';
-import 'package:hiddify/core/router/bottom_sheets/bottom_sheets_notifier.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
+import 'package:hiddify/features/servers/widget/server_profile_sync.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 class ServersPage extends ConsumerStatefulWidget {
@@ -29,13 +29,23 @@ class _ServersPageState extends ConsumerState<ServersPage> {
     _future = _load();
   }
 
-  Future<MyServersResult> _load() {
+  Future<MyServersResult> _load() async {
     final auth = ref.read(authNotifierProvider);
     if (auth is! AuthAuthenticated) {
       throw const SubscriptionApiException(
           SubscriptionErrorCode.unauthorized, 'Not logged in');
     }
-    return ref.read(subscriptionApiProvider).myServers(accessToken: auth.accessToken);
+    final result = await ref
+        .read(subscriptionApiProvider)
+        .myServers(accessToken: auth.accessToken);
+    // Read-sync: drop Hiddify profiles for servers no longer in the
+    // subscription (e.g. removed in the bot).
+    final currentUrls = result.servers
+        .map((s) => s.configUrl)
+        .whereType<String>()
+        .toSet();
+    await ref.read(serverProfileSyncProvider).reconcile(currentUrls);
+    return result;
   }
 
   void _reload() => setState(() => _future = _load());
@@ -71,7 +81,10 @@ class _ServersPageState extends ConsumerState<ServersPage> {
           }
           return RefreshIndicator(
             onRefresh: () async => _reload(),
-            child: _GroupedServerList(servers: result.servers),
+            child: _GroupedServerList(
+              servers: result.servers,
+              onChanged: _reload,
+            ),
           );
         },
       ),
@@ -81,7 +94,8 @@ class _ServersPageState extends ConsumerState<ServersPage> {
 
 class _GroupedServerList extends ConsumerWidget {
   final List<MyServer> servers;
-  const _GroupedServerList({required this.servers});
+  final VoidCallback onChanged;
+  const _GroupedServerList({required this.servers, required this.onChanged});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -112,7 +126,8 @@ class _GroupedServerList extends ConsumerWidget {
               ],
             ),
           ),
-          for (final s in groups[cc]!) _ServerTile(server: s),
+          for (final s in groups[cc]!)
+            _ServerTile(server: s, onChanged: onChanged),
         ],
       ],
     );
@@ -121,7 +136,8 @@ class _GroupedServerList extends ConsumerWidget {
 
 class _ServerTile extends ConsumerWidget {
   final MyServer server;
-  const _ServerTile({required this.server});
+  final VoidCallback onChanged;
+  const _ServerTile({required this.server, required this.onChanged});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -131,14 +147,24 @@ class _ServerTile extends ConsumerWidget {
       leading: const Icon(Icons.dns_outlined),
       title: Text(server.city ?? server.name),
       subtitle: Text(
-        reachable
-            ? 'Нагрузка: ~${server.loadPercent}%'
-            : 'Временно недоступен',
+        reachable ? 'Нагрузка: ~${server.loadPercent}%' : 'Временно недоступен',
         style: theme.textTheme.bodySmall,
       ),
-      trailing: const Icon(Icons.add_circle_outline),
-      enabled: reachable,
-      onTap: reachable ? () => _connect(context, ref) : null,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline),
+            tooltip: 'Добавить и подключиться',
+            onPressed: reachable ? () => _connect(context, ref) : null,
+          ),
+          IconButton(
+            icon: Icon(Icons.delete_outline, color: theme.colorScheme.error),
+            tooltip: 'Удалить сервер',
+            onPressed: () => _delete(context, ref),
+          ),
+        ],
+      ),
     );
   }
 
@@ -146,12 +172,68 @@ class _ServerTile extends ConsumerWidget {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(SnackBar(
       content: Text('Добавляем ${server.city ?? server.code}…'),
-      duration: const Duration(seconds: 3),
+      duration: const Duration(seconds: 2),
     ));
-    // Hand the Marzban sub URL to Hiddify's existing Add-Profile flow.
-    await ref
-        .read(bottomSheetsNotifierProvider.notifier)
-        .showAddProfile(url: server.configUrl);
+    await ref.read(serverProfileSyncProvider).importServer(server.configUrl!);
+    if (!context.mounted) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(
+      content: Text('${server.city ?? server.code} добавлен — нажмите «Подключить» на главном'),
+    ));
+  }
+
+  Future<void> _delete(BuildContext context, WidgetRef ref) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Удалить сервер?'),
+        content: Text(
+          '«${server.city ?? server.name}» будет удалён из вашей подписки '
+          '— и здесь, и в Telegram-боте. Действие необратимо.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Отмена')),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !context.mounted) return;
+
+    final auth = ref.read(authNotifierProvider);
+    if (auth is! AuthAuthenticated) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(SnackBar(
+      content: Text('Удаляем ${server.city ?? server.code}…'),
+    ));
+    try {
+      await ref
+          .read(subscriptionApiProvider)
+          .deleteServer(accessToken: auth.accessToken, slotId: server.slotId);
+      // Drop the matching Hiddify profile too, so it's gone from connect.
+      await ref.read(serverProfileSyncProvider).removeProfileByUrl(server.configUrl);
+      if (!context.mounted) return;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(
+        content: Text('«${server.city ?? server.code}» удалён'),
+      ));
+      onChanged();
+    } on SubscriptionApiException catch (e) {
+      if (!context.mounted) return;
+      messenger.hideCurrentSnackBar();
+      final msg = switch (e.code) {
+        SubscriptionErrorCode.unauthorized => 'Сессия истекла. Войдите заново.',
+        SubscriptionErrorCode.network => 'Нет связи с сервером.',
+        SubscriptionErrorCode.unknown => 'Не удалось удалить: ${e.message}',
+      };
+      messenger.showSnackBar(SnackBar(content: Text(msg)));
+    }
   }
 }
 
