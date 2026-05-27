@@ -1,16 +1,14 @@
-// R-VPN+ "Серверы" screen (TZ §11 + §14.5).
+// R-VPN+ "Мои серверы" — the account's real provisioned servers,
+// synced from the Telegram bot via /v1/subscription/servers.
 //
-// Default mode: groups nodes by country. Tapping a country expands to
-// show the cities/nodes within. Advanced mode (toggle TBD in settings)
-// will surface per-node latency / load / protocol picker.
-//
-// AI Smart Connect (TZ §11.4) and one-tap connect are wired in a
-// follow-up chunk once we have the per-node config endpoint
-// (/v1/nodes/{id}/config) and a place to inject the resulting sing-box
-// outbound into Hiddify's active profile.
+// Each server carries its Marzban subscription URL; tapping it hands the
+// URL to Hiddify's Add-Profile flow so the user can connect. Servers the
+// user activates/deactivates in the bot appear/disappear here on refresh
+// (read-sync). Global node browsing lives in NodesApi/ServersPage history
+// but is no longer the primary surface — users see THEIR servers.
 
 import 'package:flutter/material.dart';
-import 'package:hiddify/core/api/nodes_api.dart';
+import 'package:hiddify/core/api/subscription_api.dart';
 import 'package:hiddify/core/router/bottom_sheets/bottom_sheets_notifier.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -23,7 +21,7 @@ class ServersPage extends ConsumerStatefulWidget {
 }
 
 class _ServersPageState extends ConsumerState<ServersPage> {
-  late Future<List<NodeItem>> _future;
+  late Future<MyServersResult> _future;
 
   @override
   void initState() {
@@ -31,13 +29,13 @@ class _ServersPageState extends ConsumerState<ServersPage> {
     _future = _load();
   }
 
-  Future<List<NodeItem>> _load() {
+  Future<MyServersResult> _load() {
     final auth = ref.read(authNotifierProvider);
     if (auth is! AuthAuthenticated) {
-      throw const NodesApiException(
-          NodesErrorCode.unauthorized, 'Not logged in');
+      throw const SubscriptionApiException(
+          SubscriptionErrorCode.unauthorized, 'Not logged in');
     }
-    return ref.read(nodesApiProvider).list(accessToken: auth.accessToken);
+    return ref.read(subscriptionApiProvider).myServers(accessToken: auth.accessToken);
   }
 
   void _reload() => setState(() => _future = _load());
@@ -46,7 +44,7 @@ class _ServersPageState extends ConsumerState<ServersPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Серверы'),
+        title: const Text('Мои серверы'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -55,7 +53,7 @@ class _ServersPageState extends ConsumerState<ServersPage> {
           ),
         ],
       ),
-      body: FutureBuilder<List<NodeItem>>(
+      body: FutureBuilder<MyServersResult>(
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -64,161 +62,138 @@ class _ServersPageState extends ConsumerState<ServersPage> {
           if (snapshot.hasError) {
             return _ErrorView(error: snapshot.error!, onRetry: _reload);
           }
-          final items = snapshot.data ?? const <NodeItem>[];
-          if (items.isEmpty) {
-            return const Center(
-              child: Padding(
-                padding: EdgeInsets.all(32),
-                child: Text(
-                  'Серверы недоступны.\nПопробуйте обновить позже.',
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            );
+          final result = snapshot.data!;
+          if (result.subscription == null) {
+            return const _NoSubscriptionView();
           }
-          return _CountryGroupedList(items: items);
+          if (result.servers.isEmpty) {
+            return const _EmptyServersView();
+          }
+          return RefreshIndicator(
+            onRefresh: () async => _reload(),
+            child: _GroupedServerList(servers: result.servers),
+          );
         },
       ),
     );
   }
 }
 
-class _CountryGroupedList extends ConsumerWidget {
-  final List<NodeItem> items;
-  const _CountryGroupedList({required this.items});
+class _GroupedServerList extends ConsumerWidget {
+  final List<MyServer> servers;
+  const _GroupedServerList({required this.servers});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final groups = <String, List<NodeItem>>{};
-    for (final n in items) {
-      groups.putIfAbsent(n.countryCode, () => []).add(n);
+    // Group by country for a tidy list.
+    final groups = <String, List<MyServer>>{};
+    for (final s in servers) {
+      groups.putIfAbsent(s.countryCode, () => []).add(s);
     }
     final countryCodes = groups.keys.toList()..sort();
 
-    return ListView.builder(
-      itemCount: countryCodes.length,
-      itemBuilder: (context, i) {
-        final cc = countryCodes[i];
-        final nodes = groups[cc]!;
-        final flag = nodes.first.countryFlag;
-        return _CountryGroup(
-          flag: flag,
-          countryCode: cc,
-          nodes: nodes,
-        );
-      },
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      children: [
+        for (final cc in countryCodes) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Row(
+              children: [
+                Text(groups[cc]!.first.countryFlag,
+                    style: const TextStyle(fontSize: 22)),
+                const SizedBox(width: 8),
+                Text(
+                  groups[cc]!.first.countryName,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          for (final s in groups[cc]!) _ServerTile(server: s),
+        ],
+      ],
     );
   }
 }
 
-class _CountryGroup extends StatelessWidget {
-  final String flag;
-  final String countryCode;
-  final List<NodeItem> nodes;
-  const _CountryGroup({
-    required this.flag,
-    required this.countryCode,
-    required this.nodes,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    // Group cities within country.
-    final cities = <String, List<NodeItem>>{};
-    for (final n in nodes) {
-      cities.putIfAbsent(n.city ?? '—', () => []).add(n);
-    }
-    return ExpansionTile(
-      leading: Text(flag.isEmpty ? '🏳️' : flag,
-          style: const TextStyle(fontSize: 28)),
-      title: Text(_countryName(countryCode),
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-          )),
-      subtitle: Text('${nodes.length} ${_pluralize(nodes.length, "сервер", "сервера", "серверов")}'),
-      children: cities.entries.map((entry) {
-        return _CityRow(city: entry.key, nodes: entry.value);
-      }).toList(),
-    );
-  }
-
-  String _countryName(String cc) => switch (cc.toUpperCase()) {
-        'RU' => 'Россия',
-        'NL' => 'Нидерланды',
-        'DE' => 'Германия',
-        'KZ' => 'Казахстан',
-        'US' => 'США',
-        'GB' => 'Великобритания',
-        'FR' => 'Франция',
-        'TR' => 'Турция',
-        'AM' => 'Армения',
-        'GE' => 'Грузия',
-        _ => cc,
-      };
-
-  String _pluralize(int n, String one, String few, String many) {
-    final mod10 = n % 10;
-    final mod100 = n % 100;
-    if (mod10 == 1 && mod100 != 11) return one;
-    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
-    return many;
-  }
-}
-
-class _CityRow extends ConsumerWidget {
-  final String city;
-  final List<NodeItem> nodes;
-  const _CityRow({required this.city, required this.nodes});
+class _ServerTile extends ConsumerWidget {
+  final MyServer server;
+  const _ServerTile({required this.server});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final avgLoad = nodes.isEmpty
-        ? 0
-        : (nodes.map((n) => n.loadPercent).reduce((a, b) => a + b) / nodes.length).round();
-    // For one-tap connect we pick the lightest-loaded node in this city.
-    final pick = [...nodes]..sort((a, b) => a.loadPercent.compareTo(b.loadPercent));
-    final preferred = pick.first;
+    final reachable = server.configUrl != null;
     return ListTile(
-      contentPadding: const EdgeInsets.only(left: 72, right: 16),
-      title: Text(city),
+      leading: const Icon(Icons.dns_outlined),
+      title: Text(server.city ?? server.name),
       subtitle: Text(
-        'Нагрузка: ~$avgLoad% • ${nodes.length} ${nodes.length == 1 ? "нода" : "нод"}',
+        reachable
+            ? 'Нагрузка: ~${server.loadPercent}%'
+            : 'Временно недоступен',
         style: theme.textTheme.bodySmall,
       ),
-      trailing: nodes.any((n) => n.isPremium)
-          ? const Icon(Icons.workspace_premium, color: Colors.amber)
-          : null,
-      onTap: () => _onTap(context, ref, preferred),
+      trailing: const Icon(Icons.add_circle_outline),
+      enabled: reachable,
+      onTap: reachable ? () => _connect(context, ref) : null,
     );
   }
 
-  Future<void> _onTap(BuildContext context, WidgetRef ref, NodeItem node) async {
-    final auth = ref.read(authNotifierProvider);
-    if (auth is! AuthAuthenticated) return;
-    // Show transient spinner snackbar.
+  Future<void> _connect(BuildContext context, WidgetRef ref) async {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(SnackBar(
-      content: Text('Получаем конфиг для ${node.code}…'),
-      duration: const Duration(seconds: 4),
+      content: Text('Добавляем ${server.city ?? server.code}…'),
+      duration: const Duration(seconds: 3),
     ));
-    try {
-      final cfg = await ref.read(nodesApiProvider).getConfig(
-            accessToken: auth.accessToken,
-            nodeId: node.id,
-          );
-      messenger.hideCurrentSnackBar();
-      if (!context.mounted) return;
-      // Hand the Marzban sub URL to Hiddify's existing "Add Profile" flow.
-      await ref
-          .read(bottomSheetsNotifierProvider.notifier)
-          .showAddProfile(url: cfg.configUrlSingbox);
-    } on NodesApiException catch (e) {
-      messenger.hideCurrentSnackBar();
-      if (!context.mounted) return;
-      messenger.showSnackBar(SnackBar(content: Text(_localiseError(e))));
-    }
+    // Hand the Marzban sub URL to Hiddify's existing Add-Profile flow.
+    await ref
+        .read(bottomSheetsNotifierProvider.notifier)
+        .showAddProfile(url: server.configUrl);
+  }
+}
+
+class _NoSubscriptionView extends StatelessWidget {
+  const _NoSubscriptionView();
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.workspace_premium_outlined, size: 48),
+            const SizedBox(height: 16),
+            Text(
+              'У вас нет активной подписки.\n'
+              'Активируйте её в Telegram-боте — серверы появятся здесь автоматически.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyServersView extends StatelessWidget {
+  const _EmptyServersView();
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(32),
+        child: Text(
+          'Подписка активна, но серверы ещё не подключены.\n'
+          'Активируйте серверы в Telegram-боте.',
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
   }
 }
 
@@ -229,8 +204,12 @@ class _ErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final msg = error is NodesApiException
-        ? _localiseError(error as NodesApiException)
+    final msg = error is SubscriptionApiException
+        ? switch ((error as SubscriptionApiException).code) {
+            SubscriptionErrorCode.unauthorized => 'Сессия истекла. Войдите заново.',
+            SubscriptionErrorCode.network => 'Нет связи с сервером.',
+            SubscriptionErrorCode.unknown => (error as SubscriptionApiException).message,
+          }
         : 'Что-то пошло не так';
     return Center(
       child: Column(
@@ -246,17 +225,3 @@ class _ErrorView extends StatelessWidget {
     );
   }
 }
-
-String _localiseError(NodesApiException e) => switch (e.code) {
-      NodesErrorCode.unauthorized => 'Сессия истекла. Войдите заново.',
-      NodesErrorCode.notFound => 'Эта нода больше недоступна.',
-      NodesErrorCode.notProvisioned => 'Эта нода не подключена к вашей подписке. '
-          'Добавьте её через панель в Telegram-боте.',
-      NodesErrorCode.bindTelegram => 'Привяжите Telegram-аккаунт, '
-          'чтобы получить доступ к серверам.',
-      NodesErrorCode.noSubscription => 'У вас нет активной подписки. '
-          'Откройте Telegram-бот и активируйте trial.',
-      NodesErrorCode.panelUnconfigured => 'Сервер временно недоступен.',
-      NodesErrorCode.network => 'Нет связи с сервером.',
-      NodesErrorCode.unknown => e.message,
-    };
