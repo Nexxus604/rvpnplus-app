@@ -10,6 +10,10 @@ Future<void> main() async {
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(statusBarColor: Colors.transparent, systemNavigationBarColor: Colors.transparent),
   );
+  // R-VPN+ is portrait-only — never rotate to landscape.
+  await SystemChrome.setPreferredOrientations(
+    const [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown],
+  );
 
   return await lazyBootstrap(widgetsBinding, Environment.prod);
 }

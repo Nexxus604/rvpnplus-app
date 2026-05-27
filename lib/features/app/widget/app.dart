@@ -15,6 +15,7 @@ import 'package:hiddify/core/router/go_router/go_router_notifier.dart';
 import 'package:hiddify/core/router/go_router/helper/active_breakpoint_notifier.dart';
 import 'package:hiddify/core/theme/app_theme.dart';
 import 'package:hiddify/core/theme/theme_preferences.dart';
+import 'package:hiddify/features/chat/widget/chat_bubble.dart';
 import 'package:hiddify/features/app_update/notifier/app_update_notifier.dart';
 import 'package:hiddify/features/connection/widget/connection_wrapper.dart';
 import 'package:hiddify/features/per_app_proxy/overview/per_app_proxy_service_notifier.dart';
@@ -87,9 +88,12 @@ class App extends HookConsumerWidget with WidgetsBindingObserver, PresLogger {
                   supportedLocales: AppLocaleUtils.supportedLocales,
                   localizationsDelegates: GlobalMaterialLocalizations.delegates,
                   debugShowCheckedModeBanner: false,
-                  themeMode: themeMode.flutterThemeMode,
-                  theme: theme.lightTheme(lightColorScheme),
-                  darkTheme: theme.darkTheme(darkColorScheme),
+                  // R-VPN+ is a single fixed cosmic dark theme — force dark and
+                  // ignore Material-You schemes (theme builders already pin the
+                  // dark_star palette regardless of the args).
+                  themeMode: ThemeMode.dark,
+                  theme: theme.darkTheme(null),
+                  darkTheme: theme.darkTheme(null),
                   title: Constants.appName,
                   builder: (context, child) {
                     final theme = Theme.of(context);
@@ -109,7 +113,14 @@ class App extends HookConsumerWidget with WidgetsBindingObserver, PresLogger {
                             ? Brightness.light
                             : Brightness.dark,
                       ),
-                      child: child,
+                      // App-wide AI assistant: a floating bubble that overlays
+                      // every route (hides itself unless authenticated).
+                      child: Stack(
+                        children: [
+                          child,
+                          const ChatBubble(),
+                        ],
+                      ),
                     );
                   },
                 );
