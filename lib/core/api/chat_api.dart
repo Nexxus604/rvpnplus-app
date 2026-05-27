@@ -38,14 +38,30 @@ class ChatMessage {
       );
 }
 
+/// A tappable action the assistant attached to its reply (e.g. a pay link).
+class ChatAction {
+  final String type; // "open_url"
+  final String label;
+  final String value;
+  const ChatAction({required this.type, required this.label, required this.value});
+
+  factory ChatAction.fromJson(Map<String, dynamic> json) => ChatAction(
+        type: json['type'] as String,
+        label: json['label'] as String,
+        value: json['value'] as String,
+      );
+}
+
 class SendMessageResult {
   final int sessionId;
   final ChatMessage userMessage;
   final ChatMessage assistantMessage;
+  final List<ChatAction> actions;
   const SendMessageResult({
     required this.sessionId,
     required this.userMessage,
     required this.assistantMessage,
+    this.actions = const [],
   });
 }
 
@@ -93,6 +109,10 @@ class ChatApi {
               ChatMessage.fromJson(data['user_message'] as Map<String, dynamic>),
           assistantMessage: ChatMessage.fromJson(
               data['assistant_message'] as Map<String, dynamic>),
+          actions: ((data['actions'] as List<dynamic>?) ?? const [])
+              .cast<Map<String, dynamic>>()
+              .map(ChatAction.fromJson)
+              .toList(),
         );
       }
       throw _statusError(response.statusCode);

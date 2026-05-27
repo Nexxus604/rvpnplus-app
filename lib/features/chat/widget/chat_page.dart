@@ -8,6 +8,7 @@ import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/common/cosmic_background.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class ChatPage extends ConsumerStatefulWidget {
   const ChatPage({super.key});
@@ -20,6 +21,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
   final List<ChatMessage> _messages = [];
+  // Actions (e.g. pay links) the assistant attached to a given message id.
+  final Map<int, List<ChatAction>> _actions = {};
   bool _loadingHistory = true;
   bool _sending = false;
   String? _error;
@@ -91,6 +94,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           ..removeWhere((m) => m.id < 0)
           ..add(res.userMessage)
           ..add(res.assistantMessage);
+        if (res.actions.isNotEmpty) {
+          _actions[res.assistantMessage.id] = res.actions;
+        }
         _sending = false;
       });
       _jumpToBottom();
@@ -116,7 +122,10 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       await ref.read(chatApiProvider).reset(accessToken: token);
     } catch (_) {/* best-effort */}
     if (!mounted) return;
-    setState(() => _messages.clear());
+    setState(() {
+      _messages.clear();
+      _actions.clear();
+    });
   }
 
   void _jumpToBottom() {
@@ -173,7 +182,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                               if (_sending && i == _messages.length) {
                                 return const _TypingBubble();
                               }
-                              return _Bubble(message: _messages[i]);
+                              final m = _messages[i];
+                              return _Bubble(message: m, actions: _actions[m.id]);
                             },
                           ),
               ),
@@ -193,38 +203,56 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 }
 
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.message});
+  const _Bubble({required this.message, this.actions});
   final ChatMessage message;
+  final List<ChatAction>? actions;
 
   @override
   Widget build(BuildContext context) {
     final isUser = message.isUser;
+    final acts = actions ?? const <ChatAction>[];
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.78),
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          gradient: isUser
-              ? const LinearGradient(colors: [Cosmic.violet, Cosmic.violetBright])
-              : null,
-          color: isUser ? null : Cosmic.card,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
-            bottomLeft: Radius.circular(isUser ? 16 : 4),
-            bottomRight: Radius.circular(isUser ? 4 : 16),
+      child: Column(
+        crossAxisAlignment:
+            isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          Container(
+            constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.78),
+            margin: const EdgeInsets.symmetric(vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              gradient: isUser
+                  ? const LinearGradient(colors: [Cosmic.violet, Cosmic.violetBright])
+                  : null,
+              color: isUser ? null : Cosmic.card,
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(16),
+                topRight: const Radius.circular(16),
+                bottomLeft: Radius.circular(isUser ? 16 : 4),
+                bottomRight: Radius.circular(isUser ? 4 : 16),
+              ),
+              border: isUser
+                  ? null
+                  : Border.all(color: Colors.white.withValues(alpha: .06)),
+            ),
+            child: Text(
+              message.content,
+              style: const TextStyle(color: Cosmic.text, fontSize: 15, height: 1.35),
+            ),
           ),
-          border: isUser
-              ? null
-              : Border.all(color: Colors.white.withValues(alpha: .06)),
-        ),
-        child: Text(
-          message.content,
-          style: const TextStyle(color: Cosmic.text, fontSize: 15, height: 1.35),
-        ),
+          for (final a in acts)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: FilledButton.icon(
+                icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                label: Text(a.label),
+                onPressed: () => launchUrl(Uri.parse(a.value),
+                    mode: LaunchMode.externalApplication),
+              ),
+            ),
+        ],
       ),
     );
   }
