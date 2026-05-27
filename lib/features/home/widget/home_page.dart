@@ -9,6 +9,7 @@ import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 import 'package:hiddify/core/api/subscription_api.dart';
 import 'package:hiddify/core/localization/translations.dart';
+import 'package:hiddify/core/router/bottom_sheets/bottom_sheets_notifier.dart';
 import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/common/cosmic_background.dart';
@@ -38,6 +39,18 @@ class HomePage extends HookConsumerWidget {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Маршрутизация',
+            icon: const Icon(Icons.tune_rounded),
+            onPressed: () =>
+                ref.read(bottomSheetsNotifierProvider.notifier).showQuickSettings(),
+          ),
+          IconButton(
+            tooltip: 'Добавить профиль',
+            icon: const Icon(Icons.add_rounded),
+            onPressed: () =>
+                ref.read(bottomSheetsNotifierProvider.notifier).showAddProfile(),
+          ),
           IconButton(
             tooltip: 'Аккаунт',
             icon: const Icon(Icons.account_circle_outlined),

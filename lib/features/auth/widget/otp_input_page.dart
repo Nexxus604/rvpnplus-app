@@ -16,6 +16,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hiddify/core/api/auth_api.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
+import 'package:hiddify/features/common/cosmic_background.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:pinput/pinput.dart';
 
@@ -127,7 +128,9 @@ class OtpInputPage extends HookConsumerWidget {
         ),
         title: const Text('Введите код'),
       ),
-      body: SafeArea(
+      backgroundColor: Colors.transparent,
+      body: CosmicBackground(
+        child: SafeArea(
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
@@ -211,6 +214,7 @@ class OtpInputPage extends HookConsumerWidget {
             ),
           ),
         ),
+      ),
       ),
     );
   }

@@ -139,16 +139,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       appBar: AppBar(
         title: Row(
           children: [
-            Container(
-              width: 30,
-              height: 30,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  colors: [Cosmic.violet, Cosmic.violetBright],
-                ),
-              ),
-              child: const Icon(Icons.auto_awesome, size: 16, color: Colors.white),
+            ClipOval(
+              child: Image.asset('assets/images/rocket_badge.png',
+                  width: 30, height: 30, fit: BoxFit.cover),
             ),
             const SizedBox(width: 10),
             const Text('Ассистент R-VPN+'),
@@ -282,14 +275,9 @@ class _EmptyChat extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(colors: [Cosmic.violet, Cosmic.violetBright]),
-              ),
-              child: const Icon(Icons.auto_awesome, color: Colors.white, size: 30),
+            ClipOval(
+              child: Image.asset('assets/images/rocket_badge.png',
+                  width: 72, height: 72, fit: BoxFit.cover),
             ),
             const SizedBox(height: 20),
             const Text(

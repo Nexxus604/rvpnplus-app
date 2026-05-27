@@ -7,6 +7,7 @@
 import 'package:flutter/material.dart';
 import 'package:hiddify/core/api/devices_api.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
+import 'package:hiddify/features/common/cosmic_background.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 class DevicesPage extends ConsumerStatefulWidget {
@@ -53,7 +54,9 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
           ),
         ],
       ),
-      body: FutureBuilder<List<DeviceItem>>(
+      backgroundColor: Colors.transparent,
+      body: CosmicBackground(
+        child: FutureBuilder<List<DeviceItem>>(
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -81,6 +84,7 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
             ),
           );
         },
+      ),
       ),
     );
   }

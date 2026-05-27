@@ -6,7 +6,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hiddify/core/api/auth_api.dart';
+import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
+import 'package:hiddify/features/common/cosmic_background.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 class EmailInputPage extends HookConsumerWidget {
@@ -47,8 +49,10 @@ class EmailInputPage extends HookConsumerWidget {
     }
 
     return Scaffold(
-      body: SafeArea(
-        child: Center(
+      backgroundColor: Colors.transparent,
+      body: CosmicBackground(
+        child: SafeArea(
+          child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: Padding(
@@ -57,6 +61,8 @@ class EmailInputPage extends HookConsumerWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const _LogoMark(),
+                  const SizedBox(height: 20),
                   Text(
                     'R-VPN+',
                     style: theme.textTheme.displaySmall?.copyWith(
@@ -113,6 +119,36 @@ class EmailInputPage extends HookConsumerWidget {
             ),
           ),
         ),
+      ),
+      ),
+    );
+  }
+}
+
+class _LogoMark extends StatelessWidget {
+  const _LogoMark();
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        width: 88,
+        height: 88,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Cosmic.violet, Cosmic.violetBright],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Cosmic.violet.withValues(alpha: .55),
+              blurRadius: 32,
+              spreadRadius: 2,
+            ),
+          ],
+        ),
+        child: const Icon(Icons.add_rounded, color: Colors.white, size: 52),
       ),
     );
   }

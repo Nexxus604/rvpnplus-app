@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:hiddify/core/api/account_api.dart';
 import 'package:hiddify/core/api/auth_api.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
+import 'package:hiddify/features/common/cosmic_background.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 class AccountPage extends ConsumerWidget {
@@ -25,8 +26,10 @@ class AccountPage extends ConsumerWidget {
     }
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(title: const Text('Аккаунт')),
-      body: SafeArea(
+      body: CosmicBackground(
+        child: SafeArea(
         child: ListView(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           children: [
@@ -51,6 +54,7 @@ class AccountPage extends ConsumerWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -163,12 +167,8 @@ class _SubscriptionCard extends StatelessWidget {
             ],
             const SizedBox(height: 12),
             FilledButton(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Скоро — управление подпиской')),
-                );
-              },
-              child: Text(sub == null ? 'Активировать' : 'Продлить'),
+              onPressed: () => GoRouter.of(context).push('/tariffs'),
+              child: Text(sub == null ? 'Выбрать тариф' : 'Продлить подписку'),
             ),
           ],
         ),

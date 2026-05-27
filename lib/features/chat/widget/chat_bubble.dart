@@ -38,31 +38,32 @@ class _Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The rocket badge from rocketvpn.net — same form across web/landings.
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         customBorder: const CircleBorder(),
         child: Container(
-          width: 56,
-          height: 56,
+          width: 60,
+          height: 60,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Cosmic.violet, Cosmic.violetBright],
-            ),
             boxShadow: [
               BoxShadow(
-                color: Cosmic.violet.withValues(alpha: .5),
-                blurRadius: 18,
+                color: Cosmic.violet.withValues(alpha: .55),
+                blurRadius: 20,
                 spreadRadius: 1,
                 offset: const Offset(0, 4),
               ),
             ],
           ),
-          child: const Icon(Icons.auto_awesome, color: Colors.white, size: 26),
+          child: ClipOval(
+            child: Image.asset(
+              'assets/images/rocket_badge.png',
+              fit: BoxFit.cover,
+            ),
+          ),
         ),
       ),
     );
