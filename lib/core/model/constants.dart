@@ -2,15 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 abstract class Constants {
-  static const appName = "Hiddify";
-  static const githubUrl = "https://github.com/hiddify/hiddify-next";
-  static const licenseUrl = "https://github.com/hiddify/hiddify-next?tab=License-1-ov-file#readme";
-  static const githubReleasesApiUrl = "https://api.github.com/repos/hiddify/hiddify-next/releases";
-  static const githubLatestReleaseUrl = "https://github.com/hiddify/hiddify-app/releases/latest";
-  static const appCastUrl = "https://raw.githubusercontent.com/hiddify/hiddify-next/main/appcast.xml";
-  static const telegramChannelUrl = "https://t.me/hiddify";
-  static const privacyPolicyUrl = "https://hiddify.com/privacy-policy/";
-  static const termsAndConditionsUrl = "https://hiddify.com/terms/";
+  static const appName = "R-VPN+";
+  // Source + license point at our public GPL-3.0 fork (which carries
+  // CREDITS.md attributing Hiddify-Next). The *releases* / appcast URLs
+  // are only read by the update checker, which is disabled
+  // (Release.allowCustomUpdateChecker=false); kept on-brand for when we
+  // ship our own checker.
+  static const githubUrl = "https://github.com/Nexxus604/rvpnplus-app";
+  static const licenseUrl = "https://github.com/Nexxus604/rvpnplus-app?tab=GPL-3.0-1-ov-file#readme";
+  static const githubReleasesApiUrl = "https://api.github.com/repos/Nexxus604/rvpnplus-app/releases";
+  static const githubLatestReleaseUrl = "https://github.com/Nexxus604/rvpnplus-app/releases/latest";
+  static const appCastUrl = "https://plus.rvpn.app/appcast.xml";
+  static const telegramChannelUrl = "https://t.me/rvpnplus_bot";
+  static const privacyPolicyUrl = "https://plus.rvpn.app/privacy/";
+  static const termsAndConditionsUrl = "https://plus.rvpn.app/terms/";
   static const cfWarpPrivacyPolicy = "https://www.cloudflare.com/application/privacypolicy/";
   static const cfWarpTermsOfService = "https://www.cloudflare.com/application/terms/";
 }

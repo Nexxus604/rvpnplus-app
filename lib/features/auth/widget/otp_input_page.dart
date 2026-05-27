@@ -53,14 +53,12 @@ class OtpInputPage extends HookConsumerWidget {
         // /home. Nothing to do here.
       } on AuthApiException catch (e) {
         if (!context.mounted) return;
+        // Turn the cells red and shake. The red STAYS until the user
+        // edits the field (handled in onChanged), instead of clearing
+        // on a short timer — the timer version flashed too fast to see
+        // and sometimes never rendered at all.
         hasError.value = true;
         shakeController.forward(from: 0);
-        // Give the red + shake a beat, then clear for a fresh attempt.
-        await Future<void>.delayed(const Duration(milliseconds: 650));
-        if (!context.mounted) return;
-        pinController.clear();
-        hasError.value = false;
-        pinFocus.requestFocus();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(_localiseError(e))),
         );
@@ -87,9 +85,18 @@ class OtpInputPage extends HookConsumerWidget {
     final focusedPinTheme = defaultPinTheme.copyDecorationWith(
       border: Border.all(color: theme.colorScheme.primary, width: 2),
     );
-    final errorPinTheme = defaultPinTheme.copyDecorationWith(
-      border: Border.all(color: theme.colorScheme.error, width: 2),
-      color: theme.colorScheme.error.withValues(alpha: 0.08),
+    final errorPinTheme = PinTheme(
+      width: cellWidth,
+      height: cellHeight,
+      textStyle: theme.textTheme.headlineSmall?.copyWith(
+        fontWeight: FontWeight.w600,
+        color: theme.colorScheme.error,
+      ),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: theme.colorScheme.error, width: 2),
+        color: theme.colorScheme.error.withValues(alpha: 0.12),
+      ),
     );
 
     return Scaffold(
@@ -152,6 +159,11 @@ class OtpInputPage extends HookConsumerWidget {
                       closeKeyboardWhenCompleted: true,
                       // Auto-submit the instant all six digits are entered.
                       onCompleted: submit,
+                      // Clear the red error state as soon as the user
+                      // edits (backspaces) after a wrong code.
+                      onChanged: (_) {
+                        if (hasError.value) hasError.value = false;
+                      },
                       enabled: !isSubmitting.value,
                     ),
                   ),
