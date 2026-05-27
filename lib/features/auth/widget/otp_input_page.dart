@@ -148,6 +148,7 @@ class OtpInputPage extends HookConsumerWidget {
       AuthErrorCode.otpWrong => 'Неверный код. Попробуйте ещё раз.',
       AuthErrorCode.otpExpired => 'Код истёк. Запросите новый.',
       AuthErrorCode.otpExhausted => 'Слишком много попыток. Запросите новый код.',
+      AuthErrorCode.otpCooldown => e.message, // «Подождите N сек…» с сервера
       AuthErrorCode.emailSendFailed => 'Не удалось отправить письмо. Попробуйте позже.',
       AuthErrorCode.refreshInvalid => 'Сессия истекла. Войдите заново.',
       AuthErrorCode.accountInactive => 'Аккаунт неактивен. Свяжитесь с поддержкой.',

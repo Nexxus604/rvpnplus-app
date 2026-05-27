@@ -28,10 +28,16 @@ final appApiClientProvider = Provider<Dio>((ref) {
         'User-Agent': 'R-VPN+ App/0.1.0',
         'Accept': 'application/json',
       },
-      // Don't auto-throw on 4xx — the app needs to inspect the error
-      // body to decide whether to show "invalid OTP" vs "rate limited"
-      // vs "server down".
-      validateStatus: (status) => status != null && status < 500,
+      // Never let Dio throw on an HTTP status — the app inspects the
+      // body + code itself (so "invalid OTP" / "rate limited" /
+      // "email send failed" all surface as proper messages). Only
+      // genuine transport failures (timeout, DNS, TLS, connection
+      // refused) raise DioException → mapped to AuthErrorCode.network.
+      //
+      // Previously this was `status < 500`, which made every 5xx
+      // (including our own 502 EMAIL_SEND_FAILED) throw a DioException
+      // that the UI mislabelled as "нет связи с интернетом".
+      validateStatus: (status) => status != null && status < 600,
     ),
   );
 

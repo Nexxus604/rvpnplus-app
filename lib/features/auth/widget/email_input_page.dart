@@ -34,7 +34,9 @@ class EmailInputPage extends HookConsumerWidget {
       } on AuthApiException catch (e) {
         if (!context.mounted) return;
         final msg = switch (e.code) {
-          AuthErrorCode.emailSendFailed => 'Не удалось отправить письмо. Проверьте email.',
+          AuthErrorCode.emailSendFailed =>
+            'Не удалось отправить письмо. Проверьте, что email написан верно.',
+          AuthErrorCode.otpCooldown => e.message, // «Подождите N сек…» с сервера
           AuthErrorCode.network => 'Нет связи с сервером. Проверьте интернет.',
           _ => e.message,
         };
