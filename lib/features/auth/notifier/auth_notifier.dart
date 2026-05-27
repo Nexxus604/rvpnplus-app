@@ -213,7 +213,12 @@ class AuthNotifier extends Notifier<AuthState> {
     }
   }
 
-  Future<void> verifyOtp(String code) async {
+  /// [onVerified] fires the moment the server accepts the code (and
+  /// tokens are persisted) but BEFORE the auth state flips to
+  /// AuthAuthenticated. The OTP screen uses it to flash the cells green
+  /// for a beat; we then delay briefly so that green is actually visible
+  /// before the router whisks the user to /home.
+  Future<void> verifyOtp(String code, {void Function()? onVerified}) async {
     final current = state;
     if (current is! AuthPendingOtp) {
       throw StateError('verifyOtp called outside AuthPendingOtp');
@@ -234,6 +239,10 @@ class AuthNotifier extends Notifier<AuthState> {
         emailVerified: result.account.emailVerified,
         hasTelegram: result.account.hasTelegram,
       );
+      onVerified?.call();
+      if (onVerified != null) {
+        await Future<void>.delayed(const Duration(milliseconds: 550));
+      }
       state = AuthAuthenticated(
         account: result.account,
         accessToken: result.accessToken,

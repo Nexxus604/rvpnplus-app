@@ -37,6 +37,7 @@ class OtpInputPage extends HookConsumerWidget {
     final pinFocus = useFocusNode();
     final isSubmitting = useState(false);
     final hasError = useState(false);
+    final isSuccess = useState(false);
 
     // Shake animation for the wrong-code feedback.
     final shakeController = useAnimationController(
@@ -48,9 +49,14 @@ class OtpInputPage extends HookConsumerWidget {
       isSubmitting.value = true;
       hasError.value = false;
       try {
-        await ref.read(authNotifierProvider.notifier).verifyOtp(code);
-        // Success → router picks up AuthAuthenticated and navigates to
-        // /home. Nothing to do here.
+        await ref.read(authNotifierProvider.notifier).verifyOtp(
+          code,
+          onVerified: () {
+            // Server accepted the code — flash the cells green before
+            // the router navigates to /home (notifier delays ~550ms).
+            isSuccess.value = true;
+          },
+        );
       } on AuthApiException catch (e) {
         if (!context.mounted) return;
         // Turn the cells red and shake. The red STAYS until the user
@@ -96,6 +102,20 @@ class OtpInputPage extends HookConsumerWidget {
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: theme.colorScheme.error, width: 2),
         color: theme.colorScheme.error.withValues(alpha: 0.12),
+      ),
+    );
+    const successGreen = Color(0xFF2E7D32);
+    final successPinTheme = PinTheme(
+      width: cellWidth,
+      height: cellHeight,
+      textStyle: theme.textTheme.headlineSmall?.copyWith(
+        fontWeight: FontWeight.w600,
+        color: successGreen,
+      ),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: successGreen, width: 2),
+        color: successGreen.withValues(alpha: 0.12),
       ),
     );
 
@@ -151,7 +171,12 @@ class OtpInputPage extends HookConsumerWidget {
                       focusNode: pinFocus,
                       autofocus: true,
                       defaultPinTheme: defaultPinTheme,
-                      focusedPinTheme: focusedPinTheme,
+                      focusedPinTheme:
+                          isSuccess.value ? successPinTheme : focusedPinTheme,
+                      // On success every cell is filled → submittedPinTheme
+                      // wins, so the green flash covers the whole field.
+                      submittedPinTheme:
+                          isSuccess.value ? successPinTheme : defaultPinTheme,
                       errorPinTheme: errorPinTheme,
                       forceErrorState: hasError.value,
                       keyboardType: TextInputType.number,

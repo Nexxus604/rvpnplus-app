@@ -107,18 +107,28 @@ class AboutPage extends HookConsumerWidget {
             delegate: SliverChildListDelegate([
               ...conditionalTiles,
               if (conditionalTiles.isNotEmpty) const Divider(),
+              // R-VPN+ contact links. The source-code link was removed at
+              // the product owner's request (repo stays public for GPL,
+              // but we don't surface it to end users).
               ListTile(
-                title: Text(t.pages.about.sourceCode),
+                title: const Text('Telegram-бот'),
                 trailing: const Icon(FluentIcons.open_24_regular),
                 onTap: () async {
-                  await UriUtils.tryLaunch(Uri.parse(Constants.githubUrl));
+                  await UriUtils.tryLaunch(Uri.parse(Constants.telegramBotUrl));
                 },
               ),
               ListTile(
-                title: Text(t.pages.about.telegramChannel),
+                title: const Text('Telegram-канал'),
                 trailing: const Icon(FluentIcons.open_24_regular),
                 onTap: () async {
                   await UriUtils.tryLaunch(Uri.parse(Constants.telegramChannelUrl));
+                },
+              ),
+              ListTile(
+                title: const Text('Telegram-чат'),
+                trailing: const Icon(FluentIcons.open_24_regular),
+                onTap: () async {
+                  await UriUtils.tryLaunch(Uri.parse(Constants.telegramChatUrl));
                 },
               ),
               ListTile(

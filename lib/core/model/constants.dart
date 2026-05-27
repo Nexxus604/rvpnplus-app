@@ -13,7 +13,9 @@ abstract class Constants {
   static const githubReleasesApiUrl = "https://api.github.com/repos/Nexxus604/rvpnplus-app/releases";
   static const githubLatestReleaseUrl = "https://github.com/Nexxus604/rvpnplus-app/releases/latest";
   static const appCastUrl = "https://plus.rvpn.app/appcast.xml";
-  static const telegramChannelUrl = "https://t.me/rvpnplus_bot";
+  static const telegramBotUrl = "https://t.me/rvpnplus_bot";
+  static const telegramChannelUrl = "https://t.me/+cBrdSmAipI8zNmJi";
+  static const telegramChatUrl = "https://t.me/+DG6iDqI1wAo1YzYy";
   static const privacyPolicyUrl = "https://plus.rvpn.app/privacy/";
   static const termsAndConditionsUrl = "https://plus.rvpn.app/terms/";
   static const cfWarpPrivacyPolicy = "https://www.cloudflare.com/application/privacypolicy/";

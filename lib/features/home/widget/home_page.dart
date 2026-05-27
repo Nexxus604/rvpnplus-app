@@ -37,15 +37,11 @@ class HomePage extends HookConsumerWidget {
           children: [
             Assets.images.logo.svg(height: 24),
             const Gap(8),
-            Text.rich(
-              TextSpan(
-                children: [
-                  TextSpan(text: t.common.appTitle),
-                  const TextSpan(text: " "),
-                  const WidgetSpan(child: AppVersionLabel(), alignment: PlaceholderAlignment.middle),
-                ],
-              ),
-            ),
+            // Just the brand name. The upstream version badge
+            // (AppVersionLabel) overflowed the title row on narrow
+            // screens — the yellow/black "OVERFLOWED" stripes the tester
+            // saw — and isn't useful to end users anyway.
+            Text(t.common.appTitle),
           ],
         ),
         actions: [
