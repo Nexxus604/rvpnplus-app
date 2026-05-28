@@ -16,7 +16,6 @@
 // profile is restored at the end (left disconnected).
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:hiddify/core/api/geo_api.dart';
@@ -184,24 +183,6 @@ class SpeedTestRunner {
     }
     await Future<void>.delayed(const Duration(milliseconds: 800));
 
-    // Exit geolocation (once). api.rvpn.app is reached DIRECTLY (not through
-    // the tunnel), so we can't ask /v1/geo for our own apparent IP — it would
-    // return the user's home IP. Instead: read the real exit IP via a
-    // third-party echo that DOES go through the tunnel (Cloudflare trace),
-    // then geolocate that specific IP via /v1/geo?ip=.
-    if (_toGeo == null) {
-      final auth = _ref.read(authNotifierProvider);
-      if (auth is AuthAuthenticated) {
-        final exitIp = await _exitIp();
-        final g = await _ref
-            .read(geoApiProvider)
-            .lookup(accessToken: auth.accessToken, ip: exitIp);
-        final base = g ?? (exitIp != null ? GeoInfo(ip: exitIp) : null);
-        if (base != null) _toGeo = base.copyWith(isp: kExitProvider);
-        _report(phase);
-      }
-    }
-
     final ping = await _ping();
     final mbps = await _download((mbps, frac) {
       _progress = base + (0.3 + 0.7 * frac) * span;
@@ -210,24 +191,6 @@ class SpeedTestRunner {
 
     return ProtocolResult(
         protocol: protocol, connected: true, downloadMbps: mbps, pingMs: ping);
-  }
-
-  /// The real exit IP as seen from outside, fetched THROUGH the tunnel via
-  /// Cloudflare's trace endpoint (returns `ip=<addr>` among other lines).
-  Future<String?> _exitIp() async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 6);
-    try {
-      final req = await client.getUrl(Uri.parse('https://speed.cloudflare.com/cdn-cgi/trace'));
-      final resp = await req.close();
-      final body = await resp.transform(const Utf8Decoder()).join();
-      for (final line in body.split('\n')) {
-        if (line.startsWith('ip=')) return line.substring(3).trim();
-      }
-    } catch (_) {
-    } finally {
-      client.close(force: true);
-    }
-    return null;
   }
 
   Future<int?> _ping() async {

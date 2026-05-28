@@ -58,7 +58,6 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage> {
   Widget build(BuildContext context) {
     final p = _progress;
     final from = p?.fromGeo;
-    final to = p?.toGeo;
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(title: Text('Тест скорости — ${widget.args.name}')),
@@ -90,10 +89,8 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage> {
                     _ElectricArc(active: _busy),
                     _GeoBlock(
                       icon: Icons.dns_rounded,
-                      title: to != null
-                          ? '${to.locationLabel}${to.ip != null ? ', IP ${to.ip}' : ''}'
-                          : 'Сервер (определяется при подключении)',
-                      subtitle: to != null ? kExitProvider : null,
+                      title: widget.args.name,
+                      subtitle: kExitProvider,
                       highlight: true,
                     ),
                     const Gap(16),

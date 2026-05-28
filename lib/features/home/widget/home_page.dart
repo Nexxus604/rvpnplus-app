@@ -26,6 +26,7 @@ import 'package:hiddify/features/servers/widget/ping_label.dart';
 import 'package:hiddify/features/servers/widget/server_profile_sync.dart';
 import 'package:hiddify/gen/assets.gen.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// True once the session is detected as expired (an authed call returned 401
 /// and the refresh failed). While set, the whole home screen is locked: the
@@ -197,6 +198,8 @@ class _BatteryOptimizationBanner extends ConsumerStatefulWidget {
       _BatteryOptimizationBannerState();
 }
 
+const _kBatteryBannerDismissedKey = 'battery_banner_dismissed';
+
 class _BatteryOptimizationBannerState
     extends ConsumerState<_BatteryOptimizationBanner> with WidgetsBindingObserver {
   bool _dismissed = false;
@@ -205,6 +208,17 @@ class _BatteryOptimizationBannerState
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    SharedPreferences.getInstance().then((p) {
+      if (mounted && (p.getBool(_kBatteryBannerDismissedKey) ?? false)) {
+        setState(() => _dismissed = true);
+      }
+    });
+  }
+
+  Future<void> _dismissForever() async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_kBatteryBannerDismissedKey, true);
+    if (mounted) setState(() => _dismissed = true);
   }
 
   @override
@@ -263,9 +277,9 @@ class _BatteryOptimizationBannerState
                 child: const Text('Разрешить'),
               ),
               TextButton(
-                onPressed: () => setState(() => _dismissed = true),
+                onPressed: _dismissForever,
                 style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                child: const Text('Позже'),
+                child: const Text('Скрыть'),
               ),
             ],
           ),
