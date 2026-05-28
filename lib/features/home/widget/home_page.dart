@@ -14,6 +14,7 @@ import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/common/cosmic_background.dart';
 import 'package:hiddify/features/home/widget/connection_button.dart';
+import 'package:hiddify/features/home/widget/connection_button_fx.dart';
 import 'package:hiddify/features/proxy/active/active_proxy_delay_indicator.dart';
 import 'package:hiddify/features/servers/notifier/server_visibility.dart';
 import 'package:hiddify/features/servers/widget/ping_label.dart';
@@ -75,7 +76,12 @@ class HomePage extends HookConsumerWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    SizedBox(height: 220, child: Center(child: ConnectionButton())),
+                    SizedBox(
+                      height: 220,
+                      child: Center(
+                        child: ConnectionButtonFx(child: ConnectionButton()),
+                      ),
+                    ),
                     ActiveProxyDelayIndicator(),
                   ],
                 ),

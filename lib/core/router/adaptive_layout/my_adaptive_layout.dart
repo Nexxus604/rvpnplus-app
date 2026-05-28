@@ -84,48 +84,49 @@ class MyAdaptiveLayout extends HookConsumerWidget {
             ? LayoutBuilder(
                 builder: (context, constraints) {
                   // 3 slots; the rocket bubble floats over the 3rd (right) one.
+                  // NB: do NOT force a fixed height — NavigationBar adds the
+                  // system-navbar safe-area itself; constraining it clips the
+                  // labels. Let the Stack size to the NavigationBar.
                   final slotCenter = constraints.maxWidth * 5 / 6;
-                  return SizedBox(
-                    height: 80,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        FocusScope(
-                          node: navScopeNode,
-                          child: NavigationBar(
-                            selectedIndex:
-                                navigationShell.currentIndex <= 1 ? navigationShell.currentIndex : 0,
-                            destinations: [
-                              NavigationDestination(
-                                icon: const Icon(Icons.power_settings_new_rounded),
-                                label: t.pages.home.title,
-                              ),
-                              NavigationDestination(
-                                icon: const Icon(Icons.settings_rounded),
-                                label: t.pages.settings.title,
-                              ),
-                              // Placeholder — the floating rocket bubble sits
-                              // over this slot (label shown below it).
-                              const NavigationDestination(
-                                icon: SizedBox(width: 32, height: 26),
-                                label: 'Поддержка',
-                              ),
-                            ],
-                            onDestinationSelected: (index) => _onTap(context, index),
-                          ),
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      FocusScope(
+                        node: navScopeNode,
+                        child: NavigationBar(
+                          selectedIndex:
+                              navigationShell.currentIndex <= 1 ? navigationShell.currentIndex : 0,
+                          destinations: [
+                            NavigationDestination(
+                              icon: const Icon(Icons.power_settings_new_rounded),
+                              label: t.pages.home.title,
+                            ),
+                            NavigationDestination(
+                              icon: const Icon(Icons.settings_rounded),
+                              label: t.pages.settings.title,
+                            ),
+                            // Placeholder — the floating rocket bubble sits
+                            // over this slot's icon (label shown below it).
+                            const NavigationDestination(
+                              icon: SizedBox(width: 36, height: 26),
+                              label: 'Поддержка',
+                            ),
+                          ],
+                          onDestinationSelected: (index) => _onTap(context, index),
                         ),
-                        // Round, pulsing AI rocket — stands out, doesn't cover
-                        // content, opens the chat.
-                        Positioned(
-                          left: slotCenter - 27,
-                          top: 6,
-                          child: RocketMark(
-                            size: 54,
-                            onTap: () => GoRouter.of(context).push('/chat'),
-                          ),
+                      ),
+                      // Round, pulsing AI rocket — over the 3rd slot's icon area
+                      // (top of the bar), so it stands out without covering
+                      // content or being clipped by the system nav.
+                      Positioned(
+                        left: slotCenter - 25,
+                        top: 4,
+                        child: RocketMark(
+                          size: 50,
+                          onTap: () => GoRouter.of(context).push('/chat'),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   );
                 },
               )
