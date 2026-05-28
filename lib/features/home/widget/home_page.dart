@@ -174,8 +174,20 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
               if (result.servers.isEmpty) return const _EmptyServersView();
               // Hide servers the user switched off in the catalog (local
               // preference). Default: everything visible.
-              final visible =
+              final shown =
                   result.servers.where((s) => !hidden.contains(s.code)).toList();
+              // One card per server location: an account can hold several
+              // slots on the same node (multi-device) — for the connect list
+              // that's just duplicate cards. Prefer a slot with a config URL.
+              final byCode = <String, MyServer>{};
+              for (final s in shown) {
+                final existing = byCode[s.code];
+                if (existing == null ||
+                    (existing.configUrl == null && s.configUrl != null)) {
+                  byCode[s.code] = s;
+                }
+              }
+              final visible = byCode.values.toList();
               if (visible.isEmpty) return const _AllHiddenView();
               return RefreshIndicator(
                 onRefresh: () async => _reload(),
@@ -221,7 +233,7 @@ class _ServerCard extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    server.city ?? server.name,
+                    server.displayName,
                     style: const TextStyle(
                         color: Cosmic.text, fontSize: 15, fontWeight: FontWeight.w600),
                   ),

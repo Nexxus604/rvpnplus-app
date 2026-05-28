@@ -7,6 +7,18 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 enum SubscriptionErrorCode { unauthorized, network, unknown }
 
+// Regional-indicator flag emoji (🇷🇺 etc.) = pairs of U+1F1E6..U+1F1FF.
+final _flagEmoji = RegExp(r'[\u{1F1E6}-\u{1F1FF}]', unicode: true);
+
+/// Server name with the trailing flag emoji stripped, falling back to city
+/// then code. Cards render their own flag, so name's flag is redundant.
+String _serverLabel(String name, String? city, String code) {
+  final n = name.replaceAll(_flagEmoji, '').trim();
+  if (n.isNotEmpty) return n;
+  final c = city?.trim() ?? '';
+  return c.isNotEmpty ? c : code;
+}
+
 class SubscriptionApiException implements Exception {
   final SubscriptionErrorCode code;
   final String message;
@@ -66,6 +78,11 @@ class MyServer {
     this.configUrl,
   });
 
+  /// Human label: server name minus the trailing flag emoji (the card shows
+  /// its own flag), so same-city nodes stay distinct ("Москва (Каскад 1)"
+  /// vs "(Каскад 2)"). Falls back to city/code.
+  String get displayName => _serverLabel(name, city, code);
+
   factory MyServer.fromJson(Map<String, dynamic> json) => MyServer(
         slotId: json['slot_id'] as int,
         code: json['code'] as String,
@@ -114,6 +131,8 @@ class CatalogServer {
     this.city,
     this.slotId,
   });
+
+  String get displayName => _serverLabel(name, city, code);
 
   factory CatalogServer.fromJson(Map<String, dynamic> json) => CatalogServer(
         code: json['code'] as String,

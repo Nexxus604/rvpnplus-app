@@ -250,7 +250,7 @@ class _ServerRow extends StatelessWidget {
                   children: [
                     Flexible(
                       child: Text(
-                        server.city ?? server.name,
+                        server.displayName,
                         style: const TextStyle(
                             color: Cosmic.text, fontSize: 15, fontWeight: FontWeight.w600),
                       ),
