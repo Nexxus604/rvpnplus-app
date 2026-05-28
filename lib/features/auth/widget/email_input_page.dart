@@ -7,12 +7,19 @@
 // the deep-space background) on top, the real email field + button + links
 // below.
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hiddify/core/api/auth_api.dart';
 import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+
+const OutlineInputBorder _noBorder = OutlineInputBorder(
+  borderRadius: BorderRadius.all(Radius.circular(12)),
+  borderSide: BorderSide.none,
+);
 
 class EmailInputPage extends HookConsumerWidget {
   const EmailInputPage({super.key});
@@ -71,6 +78,13 @@ class EmailInputPage extends HookConsumerWidget {
                         width: double.infinity,
                         fit: BoxFit.fitWidth,
                       ),
+                      // Pulsing radiance over the orb the figure holds.
+                      const Positioned.fill(
+                        child: Align(
+                          alignment: Alignment(0, -0.18),
+                          child: _OrbGlow(),
+                        ),
+                      ),
                       const Positioned(
                         left: 0,
                         right: 0,
@@ -99,15 +113,23 @@ class EmailInputPage extends HookConsumerWidget {
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 20),
-                        TextField(
-                          controller: emailController,
-                          keyboardType: TextInputType.emailAddress,
-                          autocorrect: false,
-                          enableSuggestions: false,
-                          onSubmitted: (_) => submit(),
-                          decoration: const InputDecoration(
-                            hintText: 'Email',
-                            prefixIcon: Icon(Icons.mail_outline_rounded),
+                        _ShimmerField(
+                          child: TextField(
+                            controller: emailController,
+                            keyboardType: TextInputType.emailAddress,
+                            autocorrect: false,
+                            enableSuggestions: false,
+                            onSubmitted: (_) => submit(),
+                            decoration: InputDecoration(
+                              hintText: 'Email',
+                              prefixIcon: const Icon(Icons.mail_outline_rounded),
+                              filled: true,
+                              fillColor: Cosmic.section,
+                              // The shimmering ring is the border now.
+                              border: _noBorder,
+                              enabledBorder: _noBorder,
+                              focusedBorder: _noBorder,
+                            ),
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -142,6 +164,108 @@ class EmailInputPage extends HookConsumerWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Soft violet radiance that pulses (size + opacity) over the orb in the
+/// hero art.
+class _OrbGlow extends StatefulWidget {
+  const _OrbGlow();
+  @override
+  State<_OrbGlow> createState() => _OrbGlowState();
+}
+
+class _OrbGlowState extends State<_OrbGlow> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2600),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (context, _) {
+          final t = Curves.easeInOut.transform(_c.value);
+          final size = 150.0 + 70.0 * t;
+          final op = 0.20 + 0.35 * t;
+          return Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [
+                  Cosmic.violetBright.withValues(alpha: op),
+                  Cosmic.violet.withValues(alpha: op * 0.45),
+                  Colors.transparent,
+                ],
+                stops: const [0.0, 0.4, 1.0],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Wraps a field with a shimmering (rotating sweep-gradient) border.
+class _ShimmerField extends StatefulWidget {
+  const _ShimmerField({required this.child});
+  final Widget child;
+  @override
+  State<_ShimmerField> createState() => _ShimmerFieldState();
+}
+
+class _ShimmerFieldState extends State<_ShimmerField> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 3200),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) {
+        return Container(
+          padding: const EdgeInsets.all(1.6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(13.6),
+            gradient: SweepGradient(
+              transform: GradientRotation(_c.value * 2 * math.pi),
+              colors: const [
+                Cosmic.violet,
+                Cosmic.violetBright,
+                Color(0xFF49E0FF),
+                Cosmic.violetBright,
+                Cosmic.violet,
+              ],
+              stops: const [0.0, 0.3, 0.5, 0.7, 1.0],
+            ),
+          ),
+          child: child,
+        );
+      },
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: widget.child,
       ),
     );
   }
