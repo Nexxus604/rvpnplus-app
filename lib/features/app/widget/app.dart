@@ -15,7 +15,6 @@ import 'package:hiddify/core/router/go_router/go_router_notifier.dart';
 import 'package:hiddify/core/router/go_router/helper/active_breakpoint_notifier.dart';
 import 'package:hiddify/core/theme/app_theme.dart';
 import 'package:hiddify/core/theme/theme_preferences.dart';
-import 'package:hiddify/features/chat/widget/chat_bubble.dart';
 import 'package:hiddify/features/app_update/notifier/app_update_notifier.dart';
 import 'package:hiddify/features/connection/widget/connection_wrapper.dart';
 import 'package:hiddify/features/per_app_proxy/overview/per_app_proxy_service_notifier.dart';
@@ -113,14 +112,7 @@ class App extends HookConsumerWidget with WidgetsBindingObserver, PresLogger {
                             ? Brightness.light
                             : Brightness.dark,
                       ),
-                      // App-wide AI assistant: a floating bubble that overlays
-                      // every route (hides itself unless authenticated).
-                      child: Stack(
-                        children: [
-                          child,
-                          const ChatBubble(),
-                        ],
-                      ),
+                      child: child,
                     );
                   },
                 );

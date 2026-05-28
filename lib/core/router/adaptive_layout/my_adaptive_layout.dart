@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:hiddify/core/localization/translations.dart';
 import 'package:hiddify/core/model/constants.dart';
+import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/core/router/adaptive_layout/shell_route_action.dart';
 import 'package:hiddify/core/router/go_router/helper/active_breakpoint_notifier.dart';
 import 'package:hiddify/core/router/go_router/routing_config_notifier.dart';
@@ -84,7 +86,22 @@ class MyAdaptiveLayout extends HookConsumerWidget {
                 node: navScopeNode,
                 child: NavigationBar(
                   selectedIndex: navigationShell.currentIndex <= 1 ? navigationShell.currentIndex : 0,
-                  destinations: _navDests(_actions(t, showProfilesAction, isMobileBreakpoint)),
+                  destinations: [
+                    NavigationDestination(
+                      icon: const Icon(Icons.power_settings_new_rounded),
+                      label: t.pages.home.title,
+                    ),
+                    NavigationDestination(
+                      icon: const Icon(Icons.settings_rounded),
+                      label: t.pages.settings.title,
+                    ),
+                    // AI assistant — opens the chat (a top-level route, not a
+                    // branch). Rocket motif from rocketvpn.net.
+                    const NavigationDestination(
+                      icon: FaIcon(FontAwesomeIcons.rocket, size: 20, color: Cosmic.violetBright),
+                      label: 'Поддержка',
+                    ),
+                  ],
                   onDestinationSelected: (index) => _onTap(context, index),
                 ),
               )
@@ -95,6 +112,12 @@ class MyAdaptiveLayout extends HookConsumerWidget {
 
   // shell route action onTap
   void _onTap(BuildContext context, int index) {
+    // On mobile the 3rd item is the AI assistant — push the chat route
+    // instead of switching a shell branch (Home=0, Settings=1, AI=2).
+    if (isMobileBreakpoint && index == 2) {
+      GoRouter.of(context).push('/chat');
+      return;
+    }
     navigationShell.goBranch(index, initialLocation: index == navigationShell.currentIndex);
   }
 
@@ -106,8 +129,6 @@ class MyAdaptiveLayout extends HookConsumerWidget {
     if (!isMobileBreakpoint) ShellRouteAction(Icons.info_rounded, t.pages.about.title),
   ];
 
-  List<NavigationDestination> _navDests(List<ShellRouteAction> actions) =>
-      actions.map((e) => NavigationDestination(icon: Icon(e.icon), label: e.title)).toList();
   List<NavigationRailDestination> _navRailDests(List<ShellRouteAction> actions) =>
       actions.map((e) => NavigationRailDestination(icon: Icon(e.icon), label: Text(e.title))).toList();
 }

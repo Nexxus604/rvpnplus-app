@@ -47,6 +47,8 @@ class MyServer {
   final String? city;
   final bool isActive;
   final int loadPercent;
+  final String? pingHost;
+  final int pingPort;
   final String? configUrl;
 
   const MyServer({
@@ -59,6 +61,8 @@ class MyServer {
     required this.isActive,
     required this.loadPercent,
     this.city,
+    this.pingHost,
+    this.pingPort = 443,
     this.configUrl,
   });
 
@@ -72,6 +76,8 @@ class MyServer {
         city: json['city'] as String?,
         isActive: json['is_active'] as bool,
         loadPercent: json['load_percent'] as int,
+        pingHost: json['ping_host'] as String?,
+        pingPort: json['ping_port'] as int? ?? 443,
         configUrl: json['config_url'] as String?,
       );
 }

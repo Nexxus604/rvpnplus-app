@@ -15,6 +15,7 @@ import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/common/cosmic_background.dart';
 import 'package:hiddify/features/home/widget/connection_button.dart';
 import 'package:hiddify/features/proxy/active/active_proxy_delay_indicator.dart';
+import 'package:hiddify/features/servers/widget/ping_label.dart';
 import 'package:hiddify/features/servers/widget/server_profile_sync.dart';
 import 'package:hiddify/gen/assets.gen.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -209,13 +210,8 @@ class _ServerCard extends ConsumerWidget {
                     style: const TextStyle(
                         color: Cosmic.text, fontSize: 15, fontWeight: FontWeight.w600),
                   ),
-                  const Gap(2),
-                  Text(
-                    reachable
-                        ? 'Нагрузка ~${server.loadPercent}%'
-                        : 'Временно недоступен',
-                    style: const TextStyle(color: Cosmic.text2, fontSize: 12),
-                  ),
+                  const Gap(3),
+                  PingLabel(host: server.pingHost, port: server.pingPort),
                 ],
               ),
             ),
