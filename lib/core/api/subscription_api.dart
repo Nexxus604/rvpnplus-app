@@ -82,6 +82,53 @@ class MyServersResult {
   const MyServersResult({required this.servers, this.subscription});
 }
 
+/// A server in the activation catalog (Stage 2): may or may not already be
+/// active for this account. [slotId] is set when active (for deactivation).
+class CatalogServer {
+  final String code;
+  final String name;
+  final String countryCode;
+  final String countryName;
+  final String countryFlag;
+  final String? city;
+  final bool isPremium;
+  final int loadPercent;
+  final bool isActivated;
+  final int? slotId;
+
+  const CatalogServer({
+    required this.code,
+    required this.name,
+    required this.countryCode,
+    required this.countryName,
+    required this.countryFlag,
+    required this.isPremium,
+    required this.loadPercent,
+    required this.isActivated,
+    this.city,
+    this.slotId,
+  });
+
+  factory CatalogServer.fromJson(Map<String, dynamic> json) => CatalogServer(
+        code: json['code'] as String,
+        name: json['name'] as String,
+        countryCode: json['country_code'] as String,
+        countryName: json['country_name'] as String,
+        countryFlag: json['country_flag'] as String? ?? '',
+        city: json['city'] as String?,
+        isPremium: json['is_premium'] as bool,
+        loadPercent: json['load_percent'] as int,
+        isActivated: json['is_activated'] as bool,
+        slotId: json['slot_id'] as int?,
+      );
+}
+
+class CatalogResult {
+  final SubInfo? subscription;
+  final List<CatalogServer> servers;
+  const CatalogResult({required this.servers, this.subscription});
+}
+
 class SubscriptionApi {
   final Dio _dio;
   const SubscriptionApi(this._dio);
@@ -103,6 +150,70 @@ class SubscriptionApi {
       throw SubscriptionApiException(
           SubscriptionErrorCode.unknown, 'HTTP ${response.statusCode}');
     } on DioException catch (e) {
+      throw SubscriptionApiException(
+          SubscriptionErrorCode.network, e.message ?? 'Network error');
+    }
+  }
+
+  Future<CatalogResult> catalog({required String accessToken}) async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/subscription/catalog',
+        options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+      );
+      if (response.statusCode == 200) {
+        final data = response.data!;
+        return CatalogResult(
+          subscription: data['subscription'] != null
+              ? SubInfo.fromJson(data['subscription'] as Map<String, dynamic>)
+              : null,
+          servers: (data['servers'] as List<dynamic>)
+              .cast<Map<String, dynamic>>()
+              .map(CatalogServer.fromJson)
+              .toList(),
+        );
+      }
+      if (response.statusCode == 401) {
+        throw const SubscriptionApiException(
+            SubscriptionErrorCode.unauthorized, 'Access token rejected');
+      }
+      throw SubscriptionApiException(
+          SubscriptionErrorCode.unknown, 'HTTP ${response.statusCode}');
+    } on DioException catch (e) {
+      throw SubscriptionApiException(
+          SubscriptionErrorCode.network, e.message ?? 'Network error');
+    }
+  }
+
+  /// Activate (provision) a server by code. Returns the server message.
+  Future<String> activateServer({
+    required String accessToken,
+    required String serverCode,
+  }) async {
+    try {
+      final response = await _dio.post<Map<String, dynamic>>(
+        '/subscription/servers',
+        data: {'server_code': serverCode},
+        options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+      );
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        return (response.data?['message'] as String?) ?? 'Сервер активирован';
+      }
+      if (response.statusCode == 401) {
+        throw const SubscriptionApiException(
+            SubscriptionErrorCode.unauthorized, 'Access token rejected');
+      }
+      // 409 ACTIVATE_FAILED / 412 BIND_TELEGRAM carry a detail message.
+      final detail = response.data?['detail'];
+      final msg = detail is Map ? (detail['message'] as String?) : null;
+      throw SubscriptionApiException(
+          SubscriptionErrorCode.unknown, msg ?? 'HTTP ${response.statusCode}');
+    } on DioException catch (e) {
+      final detail = e.response?.data is Map ? e.response?.data['detail'] : null;
+      final msg = detail is Map ? (detail['message'] as String?) : null;
+      if (msg != null) {
+        throw SubscriptionApiException(SubscriptionErrorCode.unknown, msg);
+      }
       throw SubscriptionApiException(
           SubscriptionErrorCode.network, e.message ?? 'Network error');
     }

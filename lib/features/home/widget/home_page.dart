@@ -42,7 +42,7 @@ class HomePage extends HookConsumerWidget {
           IconButton(
             tooltip: 'Серверы',
             icon: const Icon(Icons.dns_outlined),
-            onPressed: () => GoRouter.of(context).push('/servers'),
+            onPressed: () => GoRouter.of(context).push('/servers/catalog'),
           ),
           IconButton(
             tooltip: 'Маршрутизация',
@@ -134,6 +134,12 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
                     color: Cosmic.text, fontSize: 17, fontWeight: FontWeight.w600),
               ),
               const Spacer(),
+              IconButton(
+                tooltip: 'Добавить сервер',
+                icon: const Icon(Icons.add_circle_outline_rounded, size: 22),
+                color: Cosmic.violetBright,
+                onPressed: () => GoRouter.of(context).push('/servers/catalog'),
+              ),
               IconButton(
                 tooltip: 'Обновить',
                 icon: const Icon(Icons.refresh_rounded, size: 20),

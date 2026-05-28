@@ -22,6 +22,7 @@ import 'package:hiddify/features/profile/details/profile_details_page.dart';
 import 'package:hiddify/features/profile/notifier/active_profile_notifier.dart';
 import 'package:hiddify/features/profile/overview/profiles_page.dart';
 import 'package:hiddify/features/proxy/overview/proxies_overview_page.dart';
+import 'package:hiddify/features/servers/widget/server_catalog_page.dart';
 import 'package:hiddify/features/servers/widget/servers_page.dart';
 import 'package:hiddify/features/settings/overview/sections/dns_options_page.dart';
 import 'package:hiddify/features/settings/overview/sections/general_page.dart';
@@ -283,6 +284,7 @@ class RoutingConfigNotifier extends _$RoutingConfigNotifier {
         GoRoute(name: 'account', path: '/account', builder: (_, _) => const AccountPage()),
         GoRoute(name: 'devices', path: '/account/devices', builder: (_, _) => const DevicesPage()),
         GoRoute(name: 'servers', path: '/servers', builder: (_, _) => const ServersPage()),
+        GoRoute(name: 'serverCatalog', path: '/servers/catalog', builder: (_, _) => const ServerCatalogPage()),
         GoRoute(name: 'chat', path: '/chat', builder: (_, _) => const ChatPage()),
         GoRoute(name: 'tariffs', path: '/tariffs', builder: (_, _) => const TariffsPage()),
       ],
