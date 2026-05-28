@@ -15,6 +15,7 @@ import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/common/cosmic_background.dart';
 import 'package:hiddify/features/home/widget/connection_button.dart';
 import 'package:hiddify/features/proxy/active/active_proxy_delay_indicator.dart';
+import 'package:hiddify/features/servers/notifier/server_visibility.dart';
 import 'package:hiddify/features/servers/widget/ping_label.dart';
 import 'package:hiddify/features/servers/widget/server_profile_sync.dart';
 import 'package:hiddify/gen/assets.gen.dart';
@@ -122,6 +123,7 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
 
   @override
   Widget build(BuildContext context) {
+    final hidden = ref.watch(serverVisibilityProvider);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -162,14 +164,19 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
               final result = snapshot.data!;
               if (result.subscription == null) return const _NoSubscriptionView();
               if (result.servers.isEmpty) return const _EmptyServersView();
+              // Hide servers the user switched off in the catalog (local
+              // preference). Default: everything visible.
+              final visible =
+                  result.servers.where((s) => !hidden.contains(s.code)).toList();
+              if (visible.isEmpty) return const _AllHiddenView();
               return RefreshIndicator(
                 onRefresh: () async => _reload(),
                 child: ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                  itemCount: result.servers.length,
+                  itemCount: visible.length,
                   separatorBuilder: (_, _) => const Gap(10),
                   itemBuilder: (context, i) =>
-                      _ServerCard(server: result.servers[i], onChanged: _reload),
+                      _ServerCard(server: visible[i], onChanged: _reload),
                 ),
               );
             },
@@ -379,6 +386,36 @@ class _EmptyServersView extends StatelessWidget {
           'Активируйте серверы в Telegram-боте.',
           textAlign: TextAlign.center,
           style: TextStyle(color: Cosmic.text2, height: 1.4),
+        ),
+      ),
+    );
+  }
+}
+
+class _AllHiddenView extends StatelessWidget {
+  const _AllHiddenView();
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.visibility_off_outlined, size: 40, color: Cosmic.text2),
+            const Gap(12),
+            const Text(
+              'Все серверы скрыты с главной.\nВключите нужные в каталоге серверов.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Cosmic.text2, height: 1.4),
+            ),
+            const Gap(14),
+            FilledButton.tonalIcon(
+              onPressed: () => GoRouter.of(context).push('/servers/catalog'),
+              icon: const Icon(Icons.dns_outlined, size: 18),
+              label: const Text('Открыть каталог'),
+            ),
+          ],
         ),
       ),
     );
