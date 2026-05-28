@@ -27,7 +27,6 @@ class EmailInputPage extends HookConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     final emailController = useTextEditingController();
     final isSubmitting = useState(false);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
@@ -112,12 +111,6 @@ class EmailInputPage extends HookConsumerWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Text(
-                              'Войдите по email',
-                              style: theme.textTheme.titleMedium?.copyWith(color: Cosmic.text2),
-                              textAlign: TextAlign.center,
-                            ),
-                            const SizedBox(height: 16),
                             _ShimmerField(
                               child: TextField(
                                 controller: emailController,

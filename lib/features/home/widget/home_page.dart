@@ -385,13 +385,15 @@ class _EmptyServersView extends StatelessWidget {
   }
 }
 
-class _ErrorView extends StatelessWidget {
+class _ErrorView extends ConsumerWidget {
   const _ErrorView({required this.error, required this.onRetry});
   final Object error;
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unauthorized = error is SubscriptionApiException &&
+        (error as SubscriptionApiException).code == SubscriptionErrorCode.unauthorized;
     final msg = error is SubscriptionApiException
         ? switch ((error as SubscriptionApiException).code) {
             SubscriptionErrorCode.unauthorized => 'Сессия истекла. Войдите заново.',
@@ -407,7 +409,14 @@ class _ErrorView extends StatelessWidget {
           const Gap(14),
           Text(msg, textAlign: TextAlign.center, style: const TextStyle(color: Cosmic.text2)),
           const Gap(14),
-          FilledButton(onPressed: onRetry, child: const Text('Повторить')),
+          // On an expired session, retrying just loops — log out so the
+          // router redirects to the login screen.
+          unauthorized
+              ? FilledButton(
+                  onPressed: () => ref.read(authNotifierProvider.notifier).logout(),
+                  child: const Text('Войти'),
+                )
+              : FilledButton(onPressed: onRetry, child: const Text('Повторить')),
         ],
       ),
     );

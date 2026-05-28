@@ -21,9 +21,6 @@ class ServerProfileSync {
   ProfileRepository? get _repo =>
       _ref.read(profileRepositoryProvider).valueOrNull;
 
-  bool _looksLikeOurs(String url) =>
-      url.contains('rvpn.app') && url.contains('/sub/');
-
   Future<List<ProfileEntity>> _allProfiles() async {
     final repo = _repo;
     if (repo == null) return const [];
@@ -67,18 +64,22 @@ class ServerProfileSync {
     } catch (_) {}
   }
 
-  /// Remove orphaned rvpn.app profiles — ones whose URL isn't among the
-  /// account's current server URLs (deleted in the bot). [currentUrls] is
+  /// Make the profile store mirror the account: remove every *remote*
+  /// profile whose URL isn't among the account's current server URLs. This
+  /// drops both our own orphans (server removed in the bot) AND foreign
+  /// leftovers (e.g. a test subscription from another VPN that was lingering
+  /// as the active profile and silently auto-connecting). [currentUrls] is
   /// the set of config_url values from /v1/subscription/servers.
+  ///
+  /// Local profiles (imported AmneziaWG .conf) have no URL and are left
+  /// alone.
   Future<int> reconcile(Set<String> currentUrls) async {
     final repo = _repo;
     if (repo == null) return 0;
     var removed = 0;
     try {
       for (final p in await _allProfiles()) {
-        if (p is RemoteProfileEntity &&
-            _looksLikeOurs(p.url) &&
-            !currentUrls.contains(p.url)) {
+        if (p is RemoteProfileEntity && !currentUrls.contains(p.url)) {
           await repo.deleteById(p.id, p.active).run();
           removed++;
         }

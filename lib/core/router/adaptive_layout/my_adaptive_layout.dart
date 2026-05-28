@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:hiddify/core/localization/translations.dart';
 import 'package:hiddify/core/model/constants.dart';
-import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/core/router/adaptive_layout/shell_route_action.dart';
+import 'package:hiddify/features/chat/widget/chat_bubble.dart';
 import 'package:hiddify/core/router/go_router/helper/active_breakpoint_notifier.dart';
 import 'package:hiddify/core/router/go_router/routing_config_notifier.dart';
 import 'package:hiddify/features/stats/widget/side_bar_stats_overview.dart';
@@ -82,28 +81,53 @@ class MyAdaptiveLayout extends HookConsumerWidget {
                 ],
               ),
         bottomNavigationBar: isMobileBreakpoint
-            ? FocusScope(
-                node: navScopeNode,
-                child: NavigationBar(
-                  selectedIndex: navigationShell.currentIndex <= 1 ? navigationShell.currentIndex : 0,
-                  destinations: [
-                    NavigationDestination(
-                      icon: const Icon(Icons.power_settings_new_rounded),
-                      label: t.pages.home.title,
+            ? LayoutBuilder(
+                builder: (context, constraints) {
+                  // 3 slots; the rocket bubble floats over the 3rd (right) one.
+                  final slotCenter = constraints.maxWidth * 5 / 6;
+                  return SizedBox(
+                    height: 80,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        FocusScope(
+                          node: navScopeNode,
+                          child: NavigationBar(
+                            selectedIndex:
+                                navigationShell.currentIndex <= 1 ? navigationShell.currentIndex : 0,
+                            destinations: [
+                              NavigationDestination(
+                                icon: const Icon(Icons.power_settings_new_rounded),
+                                label: t.pages.home.title,
+                              ),
+                              NavigationDestination(
+                                icon: const Icon(Icons.settings_rounded),
+                                label: t.pages.settings.title,
+                              ),
+                              // Placeholder — the floating rocket bubble sits
+                              // over this slot (label shown below it).
+                              const NavigationDestination(
+                                icon: SizedBox(width: 32, height: 26),
+                                label: 'Поддержка',
+                              ),
+                            ],
+                            onDestinationSelected: (index) => _onTap(context, index),
+                          ),
+                        ),
+                        // Round, pulsing AI rocket — stands out, doesn't cover
+                        // content, opens the chat.
+                        Positioned(
+                          left: slotCenter - 27,
+                          top: 6,
+                          child: RocketMark(
+                            size: 54,
+                            onTap: () => GoRouter.of(context).push('/chat'),
+                          ),
+                        ),
+                      ],
                     ),
-                    NavigationDestination(
-                      icon: const Icon(Icons.settings_rounded),
-                      label: t.pages.settings.title,
-                    ),
-                    // AI assistant — opens the chat (a top-level route, not a
-                    // branch). Rocket motif from rocketvpn.net.
-                    const NavigationDestination(
-                      icon: FaIcon(FontAwesomeIcons.rocket, size: 20, color: Cosmic.violetBright),
-                      label: 'Поддержка',
-                    ),
-                  ],
-                  onDestinationSelected: (index) => _onTap(context, index),
-                ),
+                  );
+                },
               )
             : null,
       ),
