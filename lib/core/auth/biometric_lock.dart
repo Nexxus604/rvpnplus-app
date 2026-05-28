@@ -1,12 +1,14 @@
-// Optional biometric app-lock (fingerprint / Face ID).
+// Optional biometric / device-credential app-lock (fingerprint, Face ID, or
+// the phone's screen-lock PIN/pattern/password = "код доступа").
 //
-// The login session itself is long-lived (the refresh token lasts a year and
+// The login session itself is long-lived (refresh token lasts a year and
 // rotates) — "log in once and forget". This adds an *optional* lock on top:
 // when enabled, the app re-locks every time it goes to the background and
-// requires a biometric (or device-PIN fallback) to reopen. Logout stays a
-// deliberate action in Account → "Выйти".
+// requires biometric/device-credential to reopen. Logout stays a deliberate
+// action in Account → "Выйти".
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/features/common/cosmic_background.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -18,12 +20,8 @@ const _kBiometricEnabledKey = 'biometric_lock_enabled';
 class BiometricState {
   final bool enabled;
   final bool unlocked;
-  const BiometricState({required this.enabled, required this.unlocked});
-
-  BiometricState copyWith({bool? enabled, bool? unlocked}) => BiometricState(
-        enabled: enabled ?? this.enabled,
-        unlocked: unlocked ?? this.unlocked,
-      );
+  final String? error;
+  const BiometricState({required this.enabled, required this.unlocked, this.error});
 }
 
 class BiometricLock extends Notifier<BiometricState> {
@@ -33,53 +31,65 @@ class BiometricLock extends Notifier<BiometricState> {
   @override
   BiometricState build() {
     _load();
-    // Start unlocked; if the persisted pref says enabled, _load re-locks.
     return const BiometricState(enabled: false, unlocked: true);
   }
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     final enabled = prefs.getBool(_kBiometricEnabledKey) ?? false;
-    // Cold start: locked when enabled.
     state = BiometricState(enabled: enabled, unlocked: !enabled);
   }
 
-  /// Whether the device can do biometric / device-credential auth.
-  Future<bool> isAvailable() async {
-    try {
-      return await _auth.isDeviceSupported();
-    } catch (_) {
-      return false;
+  // The actual system prompt. Allows the device PIN/pattern/password fallback
+  // (biometricOnly: false) so users without an enrolled fingerprint/Face can
+  // still unlock with their screen-lock code.
+  Future<bool> _auth0(String reason) => _auth.authenticate(
+        localizedReason: reason,
+        options: const AuthenticationOptions(
+          stickyAuth: true,
+          biometricOnly: false,
+        ),
+      );
+
+  String _humanError(Object e) {
+    if (e is PlatformException) {
+      switch (e.code) {
+        case 'NotAvailable':
+          return 'Биометрия/код недоступны. Включите блокировку экрана в настройках телефона.';
+        case 'NotEnrolled':
+          return 'Не добавлены отпечаток/Face ID/код. Добавьте их в настройках телефона.';
+        case 'PasscodeNotSet':
+          return 'Не задан код блокировки экрана. Установите PIN/пароль в настройках телефона.';
+        case 'LockedOut':
+          return 'Слишком много попыток. Подождите немного и попробуйте снова.';
+        case 'PermanentlyLockedOut':
+          return 'Биометрия временно заблокирована. Разблокируйте телефон кодом, затем повторите.';
+        case 'no_fragment_activity':
+          return 'Внутренняя ошибка (no_fragment_activity).';
+        default:
+          return 'Не удалось: ${e.code}${e.message != null ? ' — ${e.message}' : ''}';
+      }
     }
+    return 'Ошибка: $e';
   }
 
-  Future<bool> _authenticate(String reason) async {
-    if (_prompting) return false;
+  /// Turn the lock on — requires one successful auth to confirm. Returns null
+  /// on success, or a human-readable error to show the user.
+  Future<String?> enable() async {
+    if (_prompting) return null;
     _prompting = true;
     try {
-      return await _auth.authenticate(
-        localizedReason: reason,
-        // Default biometricOnly=false allows the device PIN/pattern fallback
-        // so a user without a fingerprint enrolled can still use the lock.
-        options: const AuthenticationOptions(stickyAuth: true),
-      );
-    } catch (_) {
-      return false;
+      final ok = await _auth0('Подтвердите вход — отпечаток, Face ID или код');
+      if (!ok) return 'Не подтверждено. Попробуйте ещё раз.';
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kBiometricEnabledKey, true);
+      state = const BiometricState(enabled: true, unlocked: true);
+      return null;
+    } catch (e) {
+      return _humanError(e);
     } finally {
       _prompting = false;
     }
-  }
-
-  /// Turn the lock on (requires one successful auth to confirm). Returns
-  /// false if unavailable or the user cancelled.
-  Future<bool> enable() async {
-    if (!await isAvailable()) return false;
-    final ok = await _authenticate('Подтвердите, чтобы включить вход по биометрии');
-    if (!ok) return false;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_kBiometricEnabledKey, true);
-    state = const BiometricState(enabled: true, unlocked: true);
-    return true;
   }
 
   Future<void> disable() async {
@@ -91,24 +101,36 @@ class BiometricLock extends Notifier<BiometricState> {
   /// Re-lock — called when the app is backgrounded.
   void lock() {
     if (state.enabled && state.unlocked) {
-      state = state.copyWith(unlocked: false);
+      state = BiometricState(enabled: true, unlocked: false);
     }
   }
 
   /// Prompt the user to unlock. No-op if disabled / already unlocked / a
-  /// prompt is already showing.
+  /// prompt is already on screen.
   Future<void> unlock() async {
     if (!state.enabled || state.unlocked || _prompting) return;
-    final ok = await _authenticate('Разблокируйте R-VPN+');
-    if (ok) state = state.copyWith(unlocked: true);
+    _prompting = true;
+    try {
+      final ok = await _auth0('Разблокируйте R-VPN+');
+      if (ok) {
+        state = const BiometricState(enabled: true, unlocked: true);
+      } else {
+        state = const BiometricState(
+            enabled: true, unlocked: false, error: 'Не разблокировано. Нажмите «Разблокировать».');
+      }
+    } catch (e) {
+      state = BiometricState(enabled: true, unlocked: false, error: _humanError(e));
+    } finally {
+      _prompting = false;
+    }
   }
 }
 
 final biometricLockProvider =
     NotifierProvider<BiometricLock, BiometricState>(BiometricLock.new);
 
-/// Wraps the whole app: shows a lock screen over everything while the
-/// biometric lock is engaged. Re-locks when the app is backgrounded.
+/// Wraps the whole app: shows a lock screen over everything while the lock is
+/// engaged, and auto-prompts when it engages or the app resumes.
 class BiometricGate extends ConsumerStatefulWidget {
   const BiometricGate({super.key, required this.child});
   final Widget child;
@@ -123,7 +145,6 @@ class _BiometricGateState extends ConsumerState<BiometricGate>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeUnlock());
   }
 
   @override
@@ -136,7 +157,7 @@ class _BiometricGateState extends ConsumerState<BiometricGate>
   void didChangeAppLifecycleState(AppLifecycleState s) {
     final n = ref.read(biometricLockProvider.notifier);
     // Re-lock only on a full pause/hide — NOT on `inactive`, which also fires
-    // while the system biometric sheet is up (that would loop the prompt).
+    // while the system auth sheet is up (that would loop the prompt).
     if (s == AppLifecycleState.paused || s == AppLifecycleState.hidden) {
       n.lock();
     } else if (s == AppLifecycleState.resumed) {
@@ -144,29 +165,36 @@ class _BiometricGateState extends ConsumerState<BiometricGate>
     }
   }
 
-  Future<void> _maybeUnlock() async {
+  void _maybeUnlock() {
     final st = ref.read(biometricLockProvider);
     if (st.enabled && !st.unlocked) {
-      await ref.read(biometricLockProvider.notifier).unlock();
+      ref.read(biometricLockProvider.notifier).unlock();
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // Auto-prompt the moment the lock engages (cold-start load, or re-lock).
+    ref.listen<BiometricState>(biometricLockProvider, (prev, next) {
+      final justLocked = next.enabled && !next.unlocked && (prev == null || prev.unlocked || !prev.enabled);
+      if (justLocked) WidgetsBinding.instance.addPostFrameCallback((_) => _maybeUnlock());
+    });
+
     final st = ref.watch(biometricLockProvider);
     final locked = st.enabled && !st.unlocked;
     return Stack(
       children: [
         widget.child,
-        if (locked) _LockScreen(onUnlock: _maybeUnlock),
+        if (locked) _LockScreen(error: st.error, onUnlock: _maybeUnlock),
       ],
     );
   }
 }
 
 class _LockScreen extends StatelessWidget {
-  const _LockScreen({required this.onUnlock});
+  const _LockScreen({required this.onUnlock, this.error});
   final VoidCallback onUnlock;
+  final String? error;
 
   @override
   Widget build(BuildContext context) {
@@ -174,27 +202,37 @@ class _LockScreen extends StatelessWidget {
       color: Cosmic.deepest,
       child: CosmicBackground(
         child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.fingerprint_rounded, size: 72, color: Cosmic.violetBright),
-              const SizedBox(height: 16),
-              const Text(
-                'R-VPN+ заблокирован',
-                style: TextStyle(color: Cosmic.text, fontSize: 18, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Разблокируйте по отпечатку или Face ID',
-                style: TextStyle(color: Cosmic.text2),
-              ),
-              const SizedBox(height: 24),
-              FilledButton.icon(
-                onPressed: onUnlock,
-                icon: const Icon(Icons.lock_open_rounded, size: 18),
-                label: const Text('Разблокировать'),
-              ),
-            ],
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.fingerprint_rounded, size: 72, color: Cosmic.violetBright),
+                const SizedBox(height: 16),
+                const Text(
+                  'R-VPN+ заблокирован',
+                  style: TextStyle(color: Cosmic.text, fontSize: 18, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Разблокируйте отпечатком, Face ID или кодом телефона',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Cosmic.text2),
+                ),
+                if (error != null) ...[
+                  const SizedBox(height: 10),
+                  Text(error!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Cosmic.error, fontSize: 12)),
+                ],
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: onUnlock,
+                  icon: const Icon(Icons.lock_open_rounded, size: 18),
+                  label: const Text('Разблокировать'),
+                ),
+              ],
+            ),
           ),
         ),
       ),

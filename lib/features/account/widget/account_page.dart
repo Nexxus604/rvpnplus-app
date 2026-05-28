@@ -253,11 +253,9 @@ class _BiometricToggle extends ConsumerWidget {
           final messenger = ScaffoldMessenger.of(context);
           final notifier = ref.read(biometricLockProvider.notifier);
           if (on) {
-            final ok = await notifier.enable();
-            if (!ok) {
-              messenger.showSnackBar(const SnackBar(
-                content: Text('Биометрия недоступна или вход не подтверждён.'),
-              ));
+            final err = await notifier.enable();
+            if (err != null) {
+              messenger.showSnackBar(SnackBar(content: Text(err)));
             }
           } else {
             await notifier.disable();
