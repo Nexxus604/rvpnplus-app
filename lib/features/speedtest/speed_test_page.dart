@@ -104,7 +104,14 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage> {
                   ],
                 ),
               ),
-              _ProgressBar(value: _busy ? (p?.progress ?? 0) : (p?.phase == SpeedPhase.done ? 1 : 0)),
+              _ProgressBar(
+                value: switch (p?.phase) {
+                  SpeedPhase.done || SpeedPhase.failed => 1.0,
+                  _ => p?.progress ?? 0,
+                },
+                done: p?.phase == SpeedPhase.done,
+                failed: p?.phase == SpeedPhase.failed,
+              ),
             ],
           ),
         ),
@@ -286,7 +293,7 @@ class _GeoBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: Cosmic.card,
         borderRadius: BorderRadius.circular(14),
@@ -403,30 +410,57 @@ class _ArcPainter extends CustomPainter {
 // ─────────────────────── Progress line ───────────────────────
 
 class _ProgressBar extends StatelessWidget {
-  const _ProgressBar({required this.value});
+  const _ProgressBar({required this.value, this.done = false, this.failed = false});
   final double value;
+  final bool done;
+  final bool failed;
 
   @override
   Widget build(BuildContext context) {
+    final solid = failed ? Cosmic.error : (done ? Cosmic.success : null);
+    final glow = done || failed;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(3),
-        child: Stack(
-          children: [
-            Container(height: 4, color: Cosmic.section),
-            AnimatedFractionallySizedBox(
-              duration: const Duration(milliseconds: 300),
-              widthFactor: value.clamp(0.0, 1.0),
-              child: Container(
-                height: 4,
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(colors: [Cosmic.violet, Cosmic.connectedBlue]),
-                ),
+      child: Stack(
+        children: [
+          Container(
+            height: 4,
+            decoration: BoxDecoration(
+              color: Cosmic.section,
+              borderRadius: BorderRadius.circular(3),
+            ),
+          ),
+          AnimatedFractionallySizedBox(
+            duration: const Duration(milliseconds: 300),
+            widthFactor: value.clamp(0.0, 1.0),
+            child: Container(
+              height: 4,
+              decoration: BoxDecoration(
+                color: solid,
+                gradient: solid == null
+                    ? const LinearGradient(colors: [Cosmic.violet, Cosmic.connectedBlue])
+                    : null,
+                borderRadius: BorderRadius.circular(3),
+                // When the test finishes, the bar glows white (success = green
+                // fill, failure = red fill) to signal the outcome.
+                boxShadow: glow
+                    ? [
+                        BoxShadow(
+                          color: Colors.white.withValues(alpha: 0.75),
+                          blurRadius: 9,
+                          spreadRadius: 0.5,
+                        ),
+                        BoxShadow(
+                          color: (solid ?? Colors.white).withValues(alpha: 0.6),
+                          blurRadius: 14,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : null,
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -442,8 +476,8 @@ class _ResultCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ok = result.connected;
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 5),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: Cosmic.card,
         borderRadius: BorderRadius.circular(14),
@@ -482,8 +516,8 @@ class _RunningCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 5),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: Cosmic.card,
         borderRadius: BorderRadius.circular(14),

@@ -45,10 +45,14 @@ class GeoApi {
   final Dio _dio;
   const GeoApi(this._dio);
 
-  Future<GeoInfo?> lookup({required String accessToken}) async {
+  /// Geolocate an IP. With [ip] null, the backend geolocates the caller's IP
+  /// (the user's own location). With [ip] set, it geolocates that address —
+  /// used for the VPN exit IP, which the app discovers through the tunnel.
+  Future<GeoInfo?> lookup({required String accessToken, String? ip}) async {
     try {
       final r = await _dio.get<Map<String, dynamic>>(
         '/geo',
+        queryParameters: ip != null ? {'ip': ip} : null,
         options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
       );
       if (r.statusCode == 200 && r.data != null) {
