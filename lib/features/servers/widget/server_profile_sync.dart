@@ -53,6 +53,59 @@ class ServerProfileSync {
     return result.isRight();
   }
 
+  /// Select a server via VLESS: import its sub URL and make it the ACTIVE
+  /// profile (a newly-imported profile isn't active by default). The Home
+  /// connect button then connects to it.
+  Future<bool> selectRemote(String configUrl) async {
+    final repo = _repo;
+    if (repo == null) return false;
+    try {
+      await repo.upsertRemote(configUrl).run();
+      String? id;
+      for (final p in await _allProfiles()) {
+        if (p is RemoteProfileEntity && p.url == configUrl) {
+          id = p.id;
+          break;
+        }
+      }
+      if (id == null) return false;
+      final res = await repo.setAsActive(id).run();
+      return res.isRight();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Select a server via AmneziaWG: replace any previously-imported local
+  /// (AWG) profile with this one and make it active. We keep at most one AWG
+  /// profile (the currently-selected AWG server) so there's no buildup and
+  /// the sole local is unambiguously the active one.
+  Future<bool> selectLocal(String content) async {
+    final repo = _repo;
+    if (repo == null) return false;
+    try {
+      // Drop existing local (AWG) profiles first.
+      for (final p in await _allProfiles()) {
+        if (p is LocalProfileEntity) {
+          await repo.deleteById(p.id, p.active).run();
+        }
+      }
+      await repo.addLocal(content).run();
+      String? id;
+      for (final p in await _allProfiles()) {
+        if (p is LocalProfileEntity) {
+          id = p.id;
+          break;
+        }
+      }
+      if (id == null) return false;
+      final res = await repo.setAsActive(id).run();
+      return res.isRight();
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Delete the Hiddify profile whose URL matches [configUrl], if present.
   Future<void> removeProfileByUrl(String? configUrl) async {
     if (configUrl == null) return;

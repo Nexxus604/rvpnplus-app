@@ -16,6 +16,7 @@ import 'package:hiddify/features/common/cosmic_background.dart';
 import 'package:hiddify/features/home/widget/connection_button.dart';
 import 'package:hiddify/features/home/widget/connection_button_fx.dart';
 import 'package:hiddify/features/proxy/active/active_proxy_delay_indicator.dart';
+import 'package:hiddify/features/servers/notifier/server_prefs.dart';
 import 'package:hiddify/features/servers/notifier/server_visibility.dart';
 import 'package:hiddify/features/servers/widget/ping_label.dart';
 import 'package:hiddify/features/servers/widget/server_profile_sync.dart';
@@ -220,111 +221,166 @@ class _ServerCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final reachable = server.configUrl != null;
+    final prefs = ref.watch(serverPrefsProvider);
+    final selected = prefs.selected == server.code;
+    final awg = prefs.isAwg(server.code);
     return Container(
       decoration: BoxDecoration(
-        color: Cosmic.card,
+        color: selected ? Cosmic.cardHi : Cosmic.card,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: .06)),
+        border: Border.all(
+          color: selected ? Cosmic.violet : Colors.white.withValues(alpha: .06),
+          width: selected ? 1.5 : 1,
+        ),
+        boxShadow: selected
+            ? [BoxShadow(color: Cosmic.violet.withValues(alpha: .35), blurRadius: 14)]
+            : null,
       ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
-        child: Row(
-          children: [
-            Text(server.countryFlag.isEmpty ? '🌐' : server.countryFlag,
-                style: const TextStyle(fontSize: 26)),
-            const Gap(12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    server.displayName,
-                    style: const TextStyle(
-                        color: Cosmic.text, fontSize: 15, fontWeight: FontWeight.w600),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => _select(context, ref),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+            child: Row(
+              children: [
+                Text(server.countryFlag.isEmpty ? '🌐' : server.countryFlag,
+                    style: const TextStyle(fontSize: 26)),
+                const Gap(12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              server.displayName,
+                              style: const TextStyle(
+                                  color: Cosmic.text, fontSize: 15, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          if (selected) ...[
+                            const Gap(6),
+                            const Icon(Icons.check_circle, size: 16, color: Cosmic.violetBright),
+                          ],
+                        ],
+                      ),
+                      const Gap(3),
+                      Row(
+                        children: [
+                          PingLabel(host: server.pingHost, port: server.pingPort),
+                          const Gap(8),
+                          Text(
+                            awg ? 'AmneziaWG' : 'VLESS',
+                            style: const TextStyle(color: Cosmic.muted, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                  const Gap(3),
-                  PingLabel(host: server.pingHost, port: server.pingPort),
-                ],
-              ),
-            ),
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, color: Cosmic.text2),
-              color: Cosmic.cardHi,
-              onSelected: (v) {
-                switch (v) {
-                  case 'vless':
-                    _connect(context, ref);
-                  case 'awg':
-                    _connectAwg(context, ref);
-                  case 'delete':
-                    _delete(context, ref);
-                }
-              },
-              itemBuilder: (context) => [
-                PopupMenuItem(
-                  value: 'vless',
-                  enabled: reachable,
-                  child: const Text('Подключить (VLESS)'),
                 ),
-                const PopupMenuItem(
-                  value: 'awg',
-                  child: Text('Подключить (AmneziaWG)'),
-                ),
-                const PopupMenuItem(
-                  value: 'delete',
-                  child: Text('Удалить', style: TextStyle(color: Cosmic.error)),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, color: Cosmic.text2),
+                  color: Cosmic.cardHi,
+                  onSelected: (v) {
+                    switch (v) {
+                      case 'p_vless':
+                        _applyProtocol(context, ref, kProtocolVless);
+                      case 'p_awg':
+                        _applyProtocol(context, ref, kProtocolAwg);
+                      case 'delete':
+                        _delete(context, ref);
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    CheckedPopupMenuItem(
+                      value: 'p_vless',
+                      checked: !awg,
+                      child: const Text('Протокол: VLESS'),
+                    ),
+                    CheckedPopupMenuItem(
+                      value: 'p_awg',
+                      checked: awg,
+                      child: const Text('Протокол: AmneziaWG'),
+                    ),
+                    const PopupMenuDivider(),
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Text('Удалить', style: TextStyle(color: Cosmic.error)),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 
-  Future<void> _connect(BuildContext context, WidgetRef ref) async {
+  // Select this server: import its profile via the saved protocol and make
+  // it the active one (Home connect button then connects to it). Highlights
+  // the card.
+  Future<void> _select(BuildContext context, WidgetRef ref) async {
+    final awg = ref.read(serverPrefsProvider).isAwg(server.code);
+    final sync = ref.read(serverProfileSyncProvider);
     final messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(SnackBar(content: Text('Добавляем ${server.city ?? server.code}…')));
-    await ref.read(serverProfileSyncProvider).importServer(server.configUrl!);
+    bool ok;
+    if (awg) {
+      final auth = ref.read(authNotifierProvider);
+      if (auth is! AuthAuthenticated) return;
+      messenger.showSnackBar(SnackBar(
+        content: Text('Готовлю AmneziaWG для «${server.displayName}»…'),
+        duration: const Duration(seconds: 6),
+      ));
+      try {
+        final conf = await ref
+            .read(subscriptionApiProvider)
+            .awgConfig(accessToken: auth.accessToken, slotId: server.slotId);
+        ok = await sync.selectLocal(conf);
+      } on SubscriptionApiException catch (e) {
+        if (!context.mounted) return;
+        messenger.hideCurrentSnackBar();
+        messenger.showSnackBar(SnackBar(content: Text(_errMsg(e))));
+        return;
+      }
+    } else {
+      if (server.configUrl == null) {
+        messenger.showSnackBar(
+            const SnackBar(content: Text('Сервер временно недоступен по VLESS')));
+        return;
+      }
+      ok = await sync.selectRemote(server.configUrl!);
+    }
     if (!context.mounted) return;
     messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(SnackBar(
-      content: Text('${server.city ?? server.code} добавлен — нажмите «Подключить» вверху'),
-    ));
+    if (ok) {
+      await ref.read(serverPrefsProvider.notifier).setSelected(server.code);
+      if (!context.mounted) return;
+      messenger.showSnackBar(SnackBar(
+        content: Text(
+            'Выбран «${server.displayName}» (${awg ? 'AmneziaWG' : 'VLESS'}) — нажмите «Подключить»'),
+      ));
+    } else {
+      messenger.showSnackBar(const SnackBar(content: Text('Не удалось подготовить сервер')));
+    }
   }
 
-  Future<void> _connectAwg(BuildContext context, WidgetRef ref) async {
-    final auth = ref.read(authNotifierProvider);
-    if (auth is! AuthAuthenticated) return;
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(SnackBar(
-      content: Text('Готовлю AmneziaWG для ${server.city ?? server.code}…'),
-      duration: const Duration(seconds: 6),
-    ));
-    try {
-      final conf = await ref
-          .read(subscriptionApiProvider)
-          .awgConfig(accessToken: auth.accessToken, slotId: server.slotId);
-      final ok = await ref.read(serverProfileSyncProvider).importAwgConfig(conf);
-      if (!context.mounted) return;
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(SnackBar(
-        content: Text(ok
-            ? '${server.city ?? server.code} (AmneziaWG) добавлен — нажмите «Подключить» вверху'
-            : 'Не удалось импортировать AmneziaWG-конфиг'),
-      ));
-    } on SubscriptionApiException catch (e) {
-      if (!context.mounted) return;
-      messenger.hideCurrentSnackBar();
-      final msg = switch (e.code) {
+  Future<void> _applyProtocol(BuildContext context, WidgetRef ref, String proto) async {
+    await ref.read(serverPrefsProvider.notifier).setProtocol(server.code, proto);
+    // Re-apply immediately if this server is the active selection.
+    if (ref.read(serverPrefsProvider).selected == server.code && context.mounted) {
+      await _select(context, ref);
+    }
+  }
+
+  String _errMsg(SubscriptionApiException e) => switch (e.code) {
         SubscriptionErrorCode.unauthorized => 'Сессия истекла. Войдите заново.',
         SubscriptionErrorCode.network => 'Нет связи с сервером.',
         SubscriptionErrorCode.unknown => e.message,
       };
-      messenger.showSnackBar(SnackBar(content: Text(msg)));
-    }
-  }
 
   Future<void> _delete(BuildContext context, WidgetRef ref) async {
     final confirm = await showDialog<bool>(
