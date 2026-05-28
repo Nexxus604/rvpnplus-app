@@ -33,6 +33,10 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 /// tunnel is forced down — a logged-out user must not stay connected.
 final homeLockedProvider = StateProvider<bool>((ref) => false);
 
+/// True while a server switch (disconnect → swap profile → reconnect) is in
+/// flight. Guards against rapid re-taps stacking reconnects (which crashed).
+final serverSwitchingProvider = StateProvider<bool>((ref) => false);
+
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
@@ -537,51 +541,94 @@ class _ServerCard extends ConsumerWidget {
     );
   }
 
-  // Select this server: import its profile via the saved protocol and make
-  // it the active one (Home connect button then connects to it). Highlights
-  // the card.
+  // Select this server: import its profile via the saved protocol and make it
+  // active. If the tunnel is currently up we do a CONTROLLED switch — drop the
+  // connection BEFORE swapping the active profile, then reconnect — instead of
+  // hot-swapping the profile under a live connection (which crashed the app).
+  // A provider guard ignores rapid re-taps so reconnects can't stack.
   Future<void> _select(BuildContext context, WidgetRef ref) async {
+    if (ref.read(serverSwitchingProvider)) return;
     final awg = ref.read(serverPrefsProvider).isAwg(server.code);
     final sync = ref.read(serverProfileSyncProvider);
+    final conn = ref.read(connectionNotifierProvider.notifier);
     final messenger = ScaffoldMessenger.of(context);
-    bool ok;
-    if (awg) {
-      final auth = ref.read(authNotifierProvider);
-      if (auth is! AuthAuthenticated) return;
-      messenger.showSnackBar(SnackBar(
-        content: Text('Готовлю AmneziaWG для «${server.displayName}»…'),
-        duration: const Duration(seconds: 6),
-      ));
-      try {
-        final conf = await ref
-            .read(subscriptionApiProvider)
-            .awgConfig(accessToken: auth.accessToken, slotId: server.slotId);
-        ok = await sync.selectLocal(conf);
-      } on SubscriptionApiException catch (e) {
-        if (!context.mounted) return;
-        messenger.hideCurrentSnackBar();
-        messenger.showSnackBar(SnackBar(content: Text(_errMsg(e))));
-        return;
-      }
-    } else {
-      if (server.configUrl == null) {
+    final wasConnected =
+        ref.read(connectionNotifierProvider).valueOrNull?.isConnected ?? false;
+
+    ref.read(serverSwitchingProvider.notifier).state = true;
+    try {
+      // Pre-flight: make sure we have something to import.
+      if (!awg && server.configUrl == null) {
         messenger.showSnackBar(
             const SnackBar(content: Text('Сервер временно недоступен по VLESS')));
         return;
       }
-      ok = await sync.selectRemote(server.configUrl!);
-    }
-    if (!context.mounted) return;
-    messenger.hideCurrentSnackBar();
-    if (ok) {
+
+      if (wasConnected) {
+        messenger.showSnackBar(SnackBar(
+            content: Text('Переключаю на «${server.displayName}»…'),
+            duration: const Duration(seconds: 8)));
+        await conn.abortConnection();
+        await _waitDisconnected(ref);
+      }
+
+      bool ok;
+      if (awg) {
+        final auth = ref.read(authNotifierProvider);
+        if (auth is! AuthAuthenticated) return;
+        if (!wasConnected) {
+          messenger.showSnackBar(SnackBar(
+            content: Text('Готовлю AmneziaWG для «${server.displayName}»…'),
+            duration: const Duration(seconds: 6),
+          ));
+        }
+        try {
+          final conf = await ref
+              .read(subscriptionApiProvider)
+              .awgConfig(accessToken: auth.accessToken, slotId: server.slotId);
+          ok = await sync.selectLocal(conf);
+        } on SubscriptionApiException catch (e) {
+          if (!context.mounted) return;
+          messenger.hideCurrentSnackBar();
+          messenger.showSnackBar(SnackBar(content: Text(_errMsg(e))));
+          return;
+        }
+      } else {
+        ok = await sync.selectRemote(server.configUrl!);
+      }
+
+      if (!context.mounted) return;
+      messenger.hideCurrentSnackBar();
+      if (!ok) {
+        messenger.showSnackBar(const SnackBar(content: Text('Не удалось подготовить сервер')));
+        return;
+      }
       await ref.read(serverPrefsProvider.notifier).setSelected(server.code);
       if (!context.mounted) return;
-      messenger.showSnackBar(SnackBar(
-        content: Text(
-            'Выбран «${server.displayName}» (${awg ? 'AmneziaWG' : 'VLESS'}) — нажмите «Подключить»'),
-      ));
-    } else {
-      messenger.showSnackBar(const SnackBar(content: Text('Не удалось подготовить сервер')));
+      if (wasConnected) {
+        // Reconnect to the freshly-selected server (now the active profile).
+        await conn.mayConnect();
+        if (context.mounted) {
+          messenger.showSnackBar(
+              SnackBar(content: Text('Подключаюсь к «${server.displayName}»…')));
+        }
+      } else {
+        messenger.showSnackBar(SnackBar(
+          content: Text(
+              'Выбран «${server.displayName}» (${awg ? 'AmneziaWG' : 'VLESS'}) — нажмите «Подключить»'),
+        ));
+      }
+    } finally {
+      ref.read(serverSwitchingProvider.notifier).state = false;
+    }
+  }
+
+  Future<void> _waitDisconnected(WidgetRef ref) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    while (DateTime.now().isBefore(deadline)) {
+      final st = ref.read(connectionNotifierProvider).valueOrNull;
+      if (st?.isDisconnected ?? false) return;
+      await Future<void>.delayed(const Duration(milliseconds: 300));
     }
   }
 
