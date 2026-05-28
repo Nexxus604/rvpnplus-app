@@ -11,6 +11,7 @@ import 'package:hiddify/features/account/widget/account_page.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/auth/widget/email_input_page.dart';
 import 'package:hiddify/features/auth/widget/otp_input_page.dart';
+import 'package:hiddify/features/auth/widget/telegram_link_page.dart';
 import 'package:hiddify/features/chat/widget/chat_page.dart';
 import 'package:hiddify/features/devices/widget/devices_page.dart';
 import 'package:hiddify/features/home/widget/home_page.dart';
@@ -100,7 +101,11 @@ class RoutingConfigNotifier extends _$RoutingConfigNotifier {
           return null;
         }
         if (authState is AuthUnauthenticated) {
-          return location == '/auth/email' ? null : '/auth/email';
+          // Allow the email screen and the Telegram-linking flow while
+          // unauthenticated; anything else bounces to the email screen.
+          return (location == '/auth/email' || location == '/auth/telegram')
+              ? null
+              : '/auth/email';
         }
         if (authState is AuthPendingOtp) {
           return location == '/auth/otp' ? null : '/auth/otp';
@@ -281,6 +286,7 @@ class RoutingConfigNotifier extends _$RoutingConfigNotifier {
         GoRoute(name: 'intro', path: '/intro', builder: (_, _) => const IntroPage()),
         GoRoute(name: 'authEmail', path: '/auth/email', builder: (_, _) => const EmailInputPage()),
         GoRoute(name: 'authOtp', path: '/auth/otp', builder: (_, _) => const OtpInputPage()),
+        GoRoute(name: 'authTelegram', path: '/auth/telegram', builder: (_, _) => const TelegramLinkPage()),
         GoRoute(name: 'account', path: '/account', builder: (_, _) => const AccountPage()),
         GoRoute(name: 'devices', path: '/account/devices', builder: (_, _) => const DevicesPage()),
         GoRoute(name: 'servers', path: '/servers', builder: (_, _) => const ServersPage()),

@@ -12,6 +12,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
+import 'package:go_router/go_router.dart';
 import 'package:hiddify/core/api/auth_api.dart';
 import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
@@ -142,14 +143,8 @@ class EmailInputPage extends HookConsumerWidget {
                             ),
                             const SizedBox(height: 6),
                             TextButton(
-                              onPressed: () {
-                                // TODO(phase1): /auth/telegram bind flow (TZ §5.4).
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Скоро — привязка Telegram-аккаунта'),
-                                  ),
-                                );
-                              },
+                              onPressed: () =>
+                                  GoRouter.of(context).push('/auth/telegram'),
                               child: const Text('У меня уже есть Telegram-аккаунт'),
                             ),
                           ],

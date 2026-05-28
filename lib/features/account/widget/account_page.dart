@@ -35,6 +35,18 @@ class AccountPage extends ConsumerWidget {
           children: [
             _AccountHeader(account: auth.account),
             const SizedBox(height: 16),
+            if (!auth.account.hasTelegram) ...[
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.send_rounded, color: Color(0xFF835FFD)),
+                  title: const Text('Привязать Telegram'),
+                  subtitle: const Text('Подтянуть подписку и серверы из бота'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => GoRouter.of(context).push('/auth/telegram'),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             _SubscriptionCard(subscription: auth.subscription),
             const SizedBox(height: 16),
             _DevicesShortcut(),

@@ -260,6 +260,38 @@ class AuthNotifier extends Notifier<AuthState> {
     }
   }
 
+  /// Log in with tokens minted out-of-band (the Telegram-binding flow:
+  /// /v1/auth/telegram/status returns access+refresh once the bot confirms).
+  /// Fetches /v1/account to fill the Account, persists, and authenticates.
+  /// Returns false on failure (caller surfaces the error).
+  Future<bool> loginWithTokens({
+    required String accessToken,
+    required String refreshToken,
+  }) async {
+    try {
+      final details =
+          await ref.read(accountApiProvider).get(accessToken: accessToken);
+      await _persist(
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+        accountId: details.account.id,
+        accountEmail: details.account.email,
+        emailVerified: details.account.emailVerified,
+        hasTelegram: details.account.hasTelegram,
+      );
+      state = AuthAuthenticated(
+        account: details.account,
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+        subscription: details.subscription,
+      );
+      _safeFireAndForget(_probeAccount);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Exchange the stored refresh token for a fresh access token, rotating
   /// the refresh token in the process. Concurrent callers share one in-
   /// flight HTTP request (reviewer F3). On transient network failure
