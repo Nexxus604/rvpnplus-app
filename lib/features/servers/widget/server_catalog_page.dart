@@ -1,13 +1,12 @@
-// Server catalog / management.
+// Server management panel (opened from the Home "Мои серверы" title).
 //
-// Each of the account's servers (from /v1/subscription/catalog):
-//   • a switch — show / hide it on the Home "Мои серверы" list (a LOCAL
-//     display preference; ON by default so a new user just opens and
-//     connects). Does NOT touch the subscription.
-//   • a trash button — actually remove the server (deprovision: DELETE
-//     /subscription/servers/{slot_id}; mirrors into the bot).
-// Servers the account doesn't have yet get an "Активировать" button
-// (provision: POST /subscription/servers).
+// One switch per server = ACTIVATE / DEACTIVATE, fully synced with the
+// Telegram bot (shared backend):
+//   • ON  (OFF→ON) → POST /subscription/servers  (provision: Marzban user
+//     + AWG peer). The server then appears on Home and in the bot.
+//   • OFF (ON→OFF) → DELETE /subscription/servers/{slot_id} (deprovision).
+//     It disappears from Home and from the bot.
+// There is no local "hide" anymore — Home mirrors the account 1:1.
 
 import 'package:flutter/material.dart';
 import 'package:gap/gap.dart';
@@ -15,7 +14,6 @@ import 'package:hiddify/core/api/subscription_api.dart';
 import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/common/cosmic_background.dart';
-import 'package:hiddify/features/servers/notifier/server_visibility.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 class ServerCatalogPage extends ConsumerStatefulWidget {
@@ -27,7 +25,7 @@ class ServerCatalogPage extends ConsumerStatefulWidget {
 
 class _ServerCatalogPageState extends ConsumerState<ServerCatalogPage> {
   late Future<CatalogResult> _future;
-  // Server codes with an in-flight activate/delete network call.
+  // Server codes with an in-flight activate/deactivate network call.
   final Set<String> _pending = {};
 
   @override
@@ -47,12 +45,7 @@ class _ServerCatalogPageState extends ConsumerState<ServerCatalogPage> {
 
   void _reload() => setState(() => _future = _load());
 
-  // Local show/hide on Home — instant, no network.
-  void _setVisible(CatalogServer s, bool visible) {
-    ref.read(serverVisibilityProvider.notifier).setVisible(s.code, visible);
-  }
-
-  // Provision a server the account doesn't have yet.
+  // OFF→ON: provision a server the account doesn't have yet.
   Future<void> _activate(CatalogServer s) async {
     final auth = ref.read(authNotifierProvider);
     if (auth is! AuthAuthenticated || _pending.contains(s.code)) return;
@@ -67,8 +60,6 @@ class _ServerCatalogPageState extends ConsumerState<ServerCatalogPage> {
             accessToken: auth.accessToken,
             serverCode: s.code,
           );
-      // Make sure it's visible on Home after activation.
-      ref.read(serverVisibilityProvider.notifier).setVisible(s.code, true);
       if (!mounted) return;
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(SnackBar(content: Text('«${s.city ?? s.code}» активирован')));
@@ -82,24 +73,27 @@ class _ServerCatalogPageState extends ConsumerState<ServerCatalogPage> {
     }
   }
 
-  // Remove (deprovision) a server — destructive, mirrors into the bot.
-  Future<void> _delete(CatalogServer s) async {
+  // ON→OFF: deprovision (removes from account + bot). Confirm first since it
+  // tears down the Marzban user + AWG peer.
+  Future<void> _deactivate(CatalogServer s) async {
     final auth = ref.read(authNotifierProvider);
-    if (auth is! AuthAuthenticated || _pending.contains(s.code) || s.slotId == null) return;
+    if (auth is! AuthAuthenticated || _pending.contains(s.code) || s.slotId == null) {
+      return;
+    }
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Удалить сервер?'),
+        title: const Text('Деактивировать сервер?'),
         content: Text(
           '«${s.city ?? s.name}» будет удалён из вашей подписки — и здесь, '
-          'и в Telegram-боте. Действие необратимо.',
+          'и в Telegram-боте. Снова активировать можно в любой момент.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
-            child: const Text('Удалить'),
+            child: const Text('Деактивировать'),
           ),
         ],
       ),
@@ -107,7 +101,7 @@ class _ServerCatalogPageState extends ConsumerState<ServerCatalogPage> {
     if (confirm != true || !mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _pending.add(s.code));
-    messenger.showSnackBar(SnackBar(content: Text('Удаляю ${s.city ?? s.code}…')));
+    messenger.showSnackBar(SnackBar(content: Text('Деактивирую ${s.city ?? s.code}…')));
     try {
       await ref.read(subscriptionApiProvider).deleteServer(
             accessToken: auth.accessToken,
@@ -115,7 +109,7 @@ class _ServerCatalogPageState extends ConsumerState<ServerCatalogPage> {
           );
       if (!mounted) return;
       messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(SnackBar(content: Text('«${s.city ?? s.code}» удалён')));
+      messenger.showSnackBar(SnackBar(content: Text('«${s.city ?? s.code}» деактивирован')));
       _reload();
     } on SubscriptionApiException catch (e) {
       if (!mounted) return;
@@ -134,11 +128,10 @@ class _ServerCatalogPageState extends ConsumerState<ServerCatalogPage> {
 
   @override
   Widget build(BuildContext context) {
-    final hidden = ref.watch(serverVisibilityProvider);
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text('Серверы'),
+        title: const Text('Управление серверами'),
         actions: [
           IconButton(
             tooltip: 'Обновить',
@@ -193,10 +186,7 @@ class _ServerCatalogPageState extends ConsumerState<ServerCatalogPage> {
                         _ServerRow(
                           server: s,
                           pending: _pending.contains(s.code),
-                          visible: !hidden.contains(s.code),
-                          onSetVisible: (v) => _setVisible(s, v),
-                          onActivate: () => _activate(s),
-                          onDelete: () => _delete(s),
+                          onToggle: (on) => on ? _activate(s) : _deactivate(s),
                         ),
                     ],
                   ],
@@ -214,17 +204,11 @@ class _ServerRow extends StatelessWidget {
   const _ServerRow({
     required this.server,
     required this.pending,
-    required this.visible,
-    required this.onSetVisible,
-    required this.onActivate,
-    required this.onDelete,
+    required this.onToggle,
   });
   final CatalogServer server;
   final bool pending;
-  final bool visible;
-  final ValueChanged<bool> onSetVisible;
-  final VoidCallback onActivate;
-  final VoidCallback onDelete;
+  final ValueChanged<bool> onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -235,7 +219,7 @@ class _ServerRow extends StatelessWidget {
         color: Cosmic.card,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: (server.isActivated && visible)
+          color: server.isActivated
               ? Cosmic.violet.withValues(alpha: .5)
               : Colors.white.withValues(alpha: .06),
         ),
@@ -263,10 +247,11 @@ class _ServerRow extends StatelessWidget {
                 ),
                 const Gap(2),
                 Text(
-                  server.isActivated
-                      ? (visible ? 'На главном экране' : 'Скрыт с главного')
-                      : 'Не активирован',
-                  style: const TextStyle(color: Cosmic.text2, fontSize: 12),
+                  server.isActivated ? 'Активен' : 'Не активирован',
+                  style: TextStyle(
+                    color: server.isActivated ? Cosmic.success : Cosmic.text2,
+                    fontSize: 12,
+                  ),
                 ),
               ],
             ),
@@ -276,17 +261,8 @@ class _ServerRow extends StatelessWidget {
               padding: EdgeInsets.all(10),
               child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)),
             )
-          else if (server.isActivated) ...[
-            // Show/hide on Home (local), then a separate delete (trash).
-            Switch(value: visible, onChanged: onSetVisible),
-            IconButton(
-              tooltip: 'Удалить сервер',
-              icon: const Icon(Icons.delete_outline, color: Cosmic.text2),
-              onPressed: onDelete,
-            ),
-          ] else
-            // Not provisioned yet — activate it.
-            TextButton(onPressed: onActivate, child: const Text('Активировать')),
+          else
+            Switch(value: server.isActivated, onChanged: onToggle),
         ],
       ),
     );
@@ -298,9 +274,8 @@ class _Hint extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Text(
-      'Ваши серверы уже на главном экране. Переключатель показывает или '
-      'скрывает сервер на главной, а корзина — удаляет его из подписки '
-      '(и в Telegram-боте).',
+      'Переключатель активирует или деактивирует сервер в вашей подписке. '
+      'Изменения мгновенно синхронизируются с Telegram-ботом и главным экраном.',
       style: TextStyle(color: Cosmic.muted, fontSize: 12, height: 1.4),
     );
   }

@@ -20,7 +20,6 @@ import 'package:hiddify/features/home/widget/connection_button.dart';
 import 'package:hiddify/features/home/widget/connection_button_fx.dart';
 import 'package:hiddify/features/proxy/active/active_proxy_delay_indicator.dart';
 import 'package:hiddify/features/servers/notifier/server_prefs.dart';
-import 'package:hiddify/features/servers/notifier/server_visibility.dart';
 import 'package:hiddify/features/servers/widget/ping_label.dart';
 import 'package:hiddify/features/servers/widget/server_profile_sync.dart';
 import 'package:hiddify/gen/assets.gen.dart';
@@ -247,7 +246,6 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
 
   @override
   Widget build(BuildContext context) {
-    final hidden = ref.watch(serverVisibilityProvider);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -255,10 +253,26 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
           padding: const EdgeInsets.fromLTRB(20, 4, 12, 4),
           child: Row(
             children: [
-              const Text(
-                'Мои серверы',
-                style: TextStyle(
-                    color: Cosmic.text, fontSize: 17, fontWeight: FontWeight.w600),
+              // Tap the title to open the server management panel
+              // (activate / deactivate / speed test).
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => GoRouter.of(context).push('/servers/catalog'),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Мои серверы',
+                        style: TextStyle(
+                            color: Cosmic.text, fontSize: 17, fontWeight: FontWeight.w600),
+                      ),
+                      Gap(4),
+                      Icon(Icons.chevron_right_rounded, size: 20, color: Cosmic.text2),
+                    ],
+                  ),
+                ),
               ),
               const Spacer(),
               IconButton(
@@ -288,15 +302,13 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
               final result = snapshot.data!;
               if (result.subscription == null) return const _NoSubscriptionView();
               if (result.servers.isEmpty) return const _EmptyServersView();
-              // Hide servers the user switched off in the catalog (local
-              // preference). Default: everything visible.
-              final shown =
-                  result.servers.where((s) => !hidden.contains(s.code)).toList();
               // One card per server location: an account can hold several
               // slots on the same node (multi-device) — for the connect list
               // that's just duplicate cards. Prefer a slot with a config URL.
+              // The list mirrors the account 1:1 (activate/deactivate happens
+              // in the management panel and syncs with the bot).
               final byCode = <String, MyServer>{};
-              for (final s in shown) {
+              for (final s in result.servers) {
                 final existing = byCode[s.code];
                 if (existing == null ||
                     (existing.configUrl == null && s.configUrl != null)) {
@@ -304,13 +316,12 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
                 }
               }
               final visible = byCode.values.toList();
-              if (visible.isEmpty) return const _AllHiddenView();
               return RefreshIndicator(
                 onRefresh: () async => _reload(),
                 child: ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                   itemCount: visible.length,
-                  separatorBuilder: (_, _) => const Gap(10),
+                  separatorBuilder: (_, _) => const Gap(8),
                   itemBuilder: (context, i) =>
                       _ServerCard(server: visible[i], onChanged: _reload),
                 ),
@@ -351,12 +362,12 @@ class _ServerCard extends ConsumerWidget {
           borderRadius: BorderRadius.circular(16),
           onTap: () => _select(context, ref),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+            padding: const EdgeInsets.fromLTRB(12, 7, 4, 7),
             child: Row(
               children: [
                 Text(server.countryFlag.isEmpty ? '🌐' : server.countryFlag,
-                    style: const TextStyle(fontSize: 26)),
-                const Gap(12),
+                    style: const TextStyle(fontSize: 22)),
+                const Gap(10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -367,16 +378,16 @@ class _ServerCard extends ConsumerWidget {
                             child: Text(
                               server.displayName,
                               style: const TextStyle(
-                                  color: Cosmic.text, fontSize: 15, fontWeight: FontWeight.w600),
+                                  color: Cosmic.text, fontSize: 14, fontWeight: FontWeight.w600),
                             ),
                           ),
                           if (selected) ...[
                             const Gap(6),
-                            const Icon(Icons.check_circle, size: 16, color: Cosmic.violetBright),
+                            const Icon(Icons.check_circle, size: 15, color: Cosmic.violetBright),
                           ],
                         ],
                       ),
-                      const Gap(3),
+                      const Gap(2),
                       Row(
                         children: [
                           PingLabel(host: server.pingHost, port: server.pingPort),
@@ -583,36 +594,6 @@ class _EmptyServersView extends StatelessWidget {
   }
 }
 
-class _AllHiddenView extends StatelessWidget {
-  const _AllHiddenView();
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.visibility_off_outlined, size: 40, color: Cosmic.text2),
-            const Gap(12),
-            const Text(
-              'Все серверы скрыты с главной.\nВключите нужные в каталоге серверов.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Cosmic.text2, height: 1.4),
-            ),
-            const Gap(14),
-            FilledButton.tonalIcon(
-              onPressed: () => GoRouter.of(context).push('/servers/catalog'),
-              icon: const Icon(Icons.dns_outlined, size: 18),
-              label: const Text('Открыть каталог'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _ErrorView extends ConsumerWidget {
   const _ErrorView({required this.error, required this.onRetry});
   final Object error;
@@ -637,14 +618,18 @@ class _ErrorView extends ConsumerWidget {
           const Gap(14),
           Text(msg, textAlign: TextAlign.center, style: const TextStyle(color: Cosmic.text2)),
           const Gap(14),
-          // On an expired session, retrying just loops — log out so the
-          // router redirects to the login screen.
-          unauthorized
-              ? FilledButton(
-                  onPressed: () => ref.read(authNotifierProvider.notifier).logout(),
-                  child: const Text('Войти'),
-                )
-              : FilledButton(onPressed: onRetry, child: const Text('Повторить')),
+          // "Повторить" re-runs the load, which first tries a token refresh —
+          // so a recoverable session is restored without a full re-login.
+          FilledButton(onPressed: onRetry, child: const Text('Повторить')),
+          // Only on a definitively expired session do we also offer an
+          // explicit re-login (clears tokens and goes to the email screen).
+          if (unauthorized) ...[
+            const Gap(8),
+            TextButton(
+              onPressed: () => ref.read(authNotifierProvider.notifier).logout(),
+              child: const Text('Войти заново'),
+            ),
+          ],
         ],
       ),
     );

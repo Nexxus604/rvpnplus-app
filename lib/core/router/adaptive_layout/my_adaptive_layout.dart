@@ -106,10 +106,11 @@ class MyAdaptiveLayout extends HookConsumerWidget {
                               label: t.pages.settings.title,
                             ),
                             // Placeholder — the floating rocket bubble sits
-                            // over this slot's icon (label shown below it).
+                            // over this slot. No label (the rocket speaks for
+                            // itself).
                             const NavigationDestination(
                               icon: SizedBox(width: 36, height: 26),
-                              label: 'Поддержка',
+                              label: '',
                             ),
                           ],
                           onDestinationSelected: (index) => _onTap(context, index),

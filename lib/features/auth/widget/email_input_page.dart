@@ -33,6 +33,9 @@ class EmailInputPage extends HookConsumerWidget {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
     Future<void> submit() async {
+      // Guard against the button tap and the keyboard "done" both firing
+      // (which otherwise queues a second /otp/request).
+      if (isSubmitting.value) return;
       final email = emailController.text.trim();
       if (email.isEmpty || !email.contains('@')) {
         ScaffoldMessenger.of(context).showSnackBar(

@@ -130,82 +130,84 @@ class _ConnectionFxPainter extends CustomPainter {
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
     canvas.drawCircle(c, r + 2, rim);
 
-    // --- Connected: faint electric arcs drifting around the rim. ---
+    // --- Connected: two faint electric arcs drifting around the rim. ---
     if (connected) {
-      const arcs = 3;
+      const arcs = 2;
       final arcPaint = Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.6
+        ..strokeWidth = 1.3
         ..strokeCap = StrokeCap.round;
       for (var i = 0; i < arcs; i++) {
         final phase = (time + i / arcs) % 1.0;
         final fade = math.sin(phase * math.pi); // 0→1→0 over its life
         if (fade <= 0.04) continue;
-        // Reseed a few times across the life so the bolt visibly flickers.
         final rnd = math.Random(i * 131 + (phase * 4).floor());
-        var ang = i * 2.39 + time * math.pi * 0.4 + phase;
+        var ang = i * math.pi + time * math.pi * 0.4 + phase;
         var rad = r + 3;
         final path = Path()
           ..moveTo(c.dx + rad * math.cos(ang), c.dy + rad * math.sin(ang));
-        for (var seg = 0; seg < 4; seg++) {
-          rad += 5 + rnd.nextDouble() * 7;
-          ang += (rnd.nextDouble() - 0.5) * 0.5;
+        for (var seg = 0; seg < 3; seg++) {
+          rad += 6 + rnd.nextDouble() * 6;
+          ang += (rnd.nextDouble() - 0.5) * 0.45;
           path.lineTo(c.dx + rad * math.cos(ang), c.dy + rad * math.sin(ang));
         }
-        arcPaint.color = Cosmic.electric.withValues(alpha: 0.65 * fade);
+        arcPaint.color = Cosmic.electric.withValues(alpha: 0.5 * fade);
         canvas.drawPath(path, arcPaint);
       }
     }
 
-    // --- Press: strong lightning strike. ---
+    // --- Press: a clean, minimal lightning strike — one bright ring plus
+    // three crisp forked bolts (a soft glow pass under a thin core line). ---
     if (strike > 0 && strike < 1) {
-      // Bright full-area flash, peaks instantly and fades.
-      if (strike < 0.4) {
-        final k = 1 - strike / 0.4;
-        final big = size.shortestSide * 0.72;
-        final flash = Paint()
-          ..shader = RadialGradient(
-            colors: [Colors.white.withValues(alpha: 0.32 * k), Colors.transparent],
-          ).createShader(Rect.fromCircle(center: c, radius: big));
-        canvas.drawCircle(c, big, flash);
-      }
+      final tip = connected ? Cosmic.connectedBlue : Colors.white;
 
-      // Expanding shock ring.
-      final ringR = r + 4 + 78 * strike;
+      // Single thin expanding shock ring.
+      final ringR = r + 4 + 70 * Curves.easeOut.transform(strike);
       final ring = Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 4 * (1 - strike)
-        ..color = Colors.white.withValues(alpha: (1 - strike) * 0.95);
+        ..strokeWidth = 2.5 * (1 - strike)
+        ..color = tip.withValues(alpha: (1 - strike) * 0.9);
       canvas.drawCircle(c, ringR, ring);
 
-      // Bright bolts radiating outward (glow pass + core pass).
-      if (strike < 0.72) {
-        final k = 1 - strike / 0.72;
-        final glowBolt = Paint()
+      // Three forked bolts, 120° apart, fading over the first ~65%.
+      if (strike < 0.65) {
+        final k = 1 - strike / 0.65;
+        final glow = Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 5
+          ..strokeWidth = 4.5
           ..strokeCap = StrokeCap.round
-          ..color = Cosmic.electric.withValues(alpha: k * 0.55)
+          ..strokeJoin = StrokeJoin.round
+          ..color = Cosmic.electric.withValues(alpha: k * 0.45)
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
-        final bolt = Paint()
+        final core = Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.4
+          ..strokeWidth = 2
           ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
           ..color = Colors.white.withValues(alpha: k);
-        final rnd = math.Random(11);
-        const bolts = 9;
+        const bolts = 3;
+        final reach = r + 14 + 34 * strike;
         for (var i = 0; i < bolts; i++) {
-          final a = i * (2 * math.pi / bolts) + strike * 0.6;
-          var rad = r + 2;
+          final a = -math.pi / 2 + i * (2 * math.pi / bolts);
+          final start = Offset(c.dx + (r + 2) * math.cos(a), c.dy + (r + 2) * math.sin(a));
+          // A 2-kink fork: out, slight zig, slight zag.
+          final perp = a + math.pi / 2;
+          final p1 = Offset(
+            c.dx + (r + (reach - r) * 0.45) * math.cos(a) + 5 * math.cos(perp),
+            c.dy + (r + (reach - r) * 0.45) * math.sin(a) + 5 * math.sin(perp),
+          );
+          final p2 = Offset(
+            c.dx + (r + (reach - r) * 0.78) * math.cos(a) - 4 * math.cos(perp),
+            c.dy + (r + (reach - r) * 0.78) * math.sin(a) - 4 * math.sin(perp),
+          );
+          final end = Offset(c.dx + reach * math.cos(a), c.dy + reach * math.sin(a));
           final path = Path()
-            ..moveTo(c.dx + rad * math.cos(a), c.dy + rad * math.sin(a));
-          for (var seg = 0; seg < 4; seg++) {
-            rad += 10 + rnd.nextDouble() * 14 + 28 * strike;
-            final jit = (rnd.nextDouble() - 0.5) * 0.42;
-            path.lineTo(c.dx + rad * math.cos(a + jit), c.dy + rad * math.sin(a + jit));
-          }
-          canvas.drawPath(path, glowBolt);
-          canvas.drawPath(path, bolt);
+            ..moveTo(start.dx, start.dy)
+            ..lineTo(p1.dx, p1.dy)
+            ..lineTo(p2.dx, p2.dy)
+            ..lineTo(end.dx, end.dy);
+          canvas.drawPath(path, glow);
+          canvas.drawPath(path, core);
         }
       }
     }
