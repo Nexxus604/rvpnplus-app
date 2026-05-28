@@ -215,3 +215,13 @@ sentry:
   upload_sources: true
   log_level: info
   ignore_missing: true
+
+# R-VPN+ launcher icon (run: flutter_launcher_icons). Legacy = the full
+# rounded-square art; adaptive = padded glyph on the deep-space colour.
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/app_icon.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#02031C"
+  adaptive_icon_foreground: "assets/icon/app_icon.png"
