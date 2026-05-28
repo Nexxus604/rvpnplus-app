@@ -21,6 +21,9 @@ class ServerProfileSync {
   ProfileRepository? get _repo =>
       _ref.read(profileRepositoryProvider).valueOrNull;
 
+  bool _looksLikeOurs(String url) =>
+      url.contains('rvpn.app') && url.contains('/sub/');
+
   Future<List<ProfileEntity>> _allProfiles() async {
     final repo = _repo;
     if (repo == null) return const [];
@@ -64,22 +67,31 @@ class ServerProfileSync {
     } catch (_) {}
   }
 
-  /// Make the profile store mirror the account: remove every *remote*
-  /// profile whose URL isn't among the account's current server URLs. This
-  /// drops both our own orphans (server removed in the bot) AND foreign
-  /// leftovers (e.g. a test subscription from another VPN that was lingering
-  /// as the active profile and silently auto-connecting). [currentUrls] is
-  /// the set of config_url values from /v1/subscription/servers.
+  /// Make the profile store mirror the account.
   ///
-  /// Local profiles (imported AmneziaWG .conf) have no URL and are left
-  /// alone.
-  Future<int> reconcile(Set<String> currentUrls) async {
+  /// - FOREIGN remote profiles (not our rvpn.app /sub/ URL) are always
+  ///   removed — e.g. a leftover test subscription from another VPN that was
+  ///   lingering as the active profile and silently auto-connecting. They
+  ///   never belong in R-VPN+.
+  /// - OUR orphans (rvpn.app profiles no longer in [currentUrls]) are removed
+  ///   only when [authoritative] is true — i.e. the caller knows the server
+  ///   list is complete (active subscription, non-empty). This guards against
+  ///   a transient empty/partial /v1/subscription/servers response (mid
+  ///   renewal, a node whose config_url is momentarily null) wiping the
+  ///   user's working profiles — including the active one, which would drop
+  ///   the VPN.
+  ///
+  /// Local profiles (imported AmneziaWG .conf) have no URL and are left alone.
+  Future<int> reconcile(Set<String> currentUrls, {bool authoritative = true}) async {
     final repo = _repo;
     if (repo == null) return 0;
     var removed = 0;
     try {
       for (final p in await _allProfiles()) {
-        if (p is RemoteProfileEntity && !currentUrls.contains(p.url)) {
+        if (p is! RemoteProfileEntity) continue;
+        if (currentUrls.contains(p.url)) continue;
+        // Foreign → always; our orphans → only on an authoritative list.
+        if (!_looksLikeOurs(p.url) || authoritative) {
           await repo.deleteById(p.id, p.active).run();
           removed++;
         }

@@ -115,7 +115,15 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
         await ref.read(subscriptionApiProvider).myServers(accessToken: auth.accessToken);
     final currentUrls =
         result.servers.map((s) => s.configUrl).whereType<String>().toSet();
-    await ref.read(serverProfileSyncProvider).reconcile(currentUrls);
+    // The list is authoritative only with an active subscription and at least
+    // one server every entry of which has a config_url — otherwise a transient
+    // partial response must not delete our own working profiles.
+    final authoritative = result.subscription != null &&
+        result.servers.isNotEmpty &&
+        result.servers.every((s) => s.configUrl != null);
+    await ref
+        .read(serverProfileSyncProvider)
+        .reconcile(currentUrls, authoritative: authoritative);
     return result;
   }
 

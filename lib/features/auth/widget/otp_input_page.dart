@@ -69,6 +69,14 @@ class OtpInputPage extends HookConsumerWidget {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(_localiseError(e))),
         );
+      } catch (_) {
+        // Anything non-API (e.g. unexpected state) — don't fail silently.
+        if (!context.mounted) return;
+        hasError.value = true;
+        shakeController.forward(from: 0);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Что-то пошло не так. Попробуйте ещё раз.')),
+        );
       } finally {
         isSubmitting.value = false;
       }

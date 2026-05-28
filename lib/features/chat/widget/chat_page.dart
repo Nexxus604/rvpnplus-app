@@ -104,6 +104,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     } on ChatApiException catch (e) {
       if (!mounted) return;
       setState(() {
+        // Drop the optimistic bubble — the message didn't go through.
+        _messages.removeWhere((m) => m.id < 0);
         _sending = false;
         _error = switch (e.code) {
           ChatErrorCode.unauthorized => 'Сессия истекла. Войдите заново.',
@@ -133,7 +135,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
         _scroll.animateTo(
-          _scroll.position.maxScrollExtent + 120,
+          _scroll.position.maxScrollExtent,
           duration: const Duration(milliseconds: 250),
           curve: Curves.easeOut,
         );

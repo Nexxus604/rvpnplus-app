@@ -47,6 +47,21 @@ class _PingLabelState extends State<PingLabel> {
     _measure();
   }
 
+  @override
+  void didUpdateWidget(PingLabel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The list reuses State by position — re-measure if this row now shows a
+    // different server (or port), otherwise it'd display a stale ping.
+    if (oldWidget.host != widget.host || oldWidget.port != widget.port) {
+      setState(() {
+        _loading = true;
+        _failed = false;
+        _ms = null;
+      });
+      _measure();
+    }
+  }
+
   Future<void> _measure() async {
     final host = widget.host;
     if (host == null || host.isEmpty) {
