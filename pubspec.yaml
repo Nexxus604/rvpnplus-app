@@ -171,6 +171,7 @@ flutter:
     - assets/images/connect_norouz.PNG
     - assets/images/disconnect_norouz.PNG
     - assets/images/world_map.png
+    - assets/images/auth_hero.jpg
     - assets/images/source/ic_launcher_border.png
 
   fonts:

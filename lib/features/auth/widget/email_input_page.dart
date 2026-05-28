@@ -2,13 +2,16 @@
 //
 // User enters email → "Get code" calls POST /v1/auth/otp/request →
 // navigates to OTP input page (driven by auth_notifier state).
+//
+// Layout: a full-width hero illustration (user-provided art, fading into
+// the deep-space background) on top, the real email field + button + links
+// below.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hiddify/core/api/auth_api.dart';
 import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
-import 'package:hiddify/features/common/cosmic_background.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 class EmailInputPage extends HookConsumerWidget {
@@ -49,106 +52,96 @@ class EmailInputPage extends HookConsumerWidget {
     }
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: CosmicBackground(
-        child: SafeArea(
+      backgroundColor: Cosmic.deepest,
+      body: SafeArea(
+        bottom: false,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom + 16),
           child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const _LogoMark(),
-                  const SizedBox(height: 20),
-                  Text(
-                    'R-VPN+',
-                    style: theme.textTheme.displaySmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Войдите по email',
-                    style: theme.textTheme.bodyLarge,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 32),
-                  TextField(
-                    controller: emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    autofocus: true,
-                    onSubmitted: (_) => submit(),
-                    decoration: const InputDecoration(
-                      labelText: 'Email',
-                      hintText: 'you@example.com',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  FilledButton(
-                    onPressed: isSubmitting.value ? null : submit,
-                    child: isSubmitting.value
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Получить код'),
-                  ),
-                  const SizedBox(height: 16),
-                  TextButton(
-                    onPressed: () {
-                      // TODO(phase1): navigate to /auth/telegram for
-                      // existing bot-user binding flow (TZ §5.4).
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Скоро — привязка Telegram-аккаунта'),
+                  // Hero art, fading into the background at its bottom edge.
+                  Stack(
+                    children: [
+                      Image.asset(
+                        'assets/images/auth_hero.jpg',
+                        width: double.infinity,
+                        fit: BoxFit.fitWidth,
+                      ),
+                      const Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        height: 72,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Colors.transparent, Cosmic.deepest],
+                            ),
+                          ),
                         ),
-                      );
-                    },
-                    child: const Text('У меня уже есть Telegram-аккаунт'),
+                      ),
+                    ],
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'Войдите по email',
+                          style: theme.textTheme.titleMedium?.copyWith(color: Cosmic.text2),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 20),
+                        TextField(
+                          controller: emailController,
+                          keyboardType: TextInputType.emailAddress,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          onSubmitted: (_) => submit(),
+                          decoration: const InputDecoration(
+                            hintText: 'Email',
+                            prefixIcon: Icon(Icons.mail_outline_rounded),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        FilledButton(
+                          onPressed: isSubmitting.value ? null : submit,
+                          child: isSubmitting.value
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Text('Получить код'),
+                        ),
+                        const SizedBox(height: 8),
+                        TextButton(
+                          onPressed: () {
+                            // TODO(phase1): navigate to /auth/telegram for
+                            // existing bot-user binding flow (TZ §5.4).
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Скоро — привязка Telegram-аккаунта'),
+                              ),
+                            );
+                          },
+                          child: const Text('У меня уже есть Telegram-аккаунт'),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
           ),
         ),
-      ),
-      ),
-    );
-  }
-}
-
-class _LogoMark extends StatelessWidget {
-  const _LogoMark();
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Container(
-        width: 88,
-        height: 88,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Cosmic.violet, Cosmic.violetBright],
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Cosmic.violet.withValues(alpha: .55),
-              blurRadius: 32,
-              spreadRadius: 2,
-            ),
-          ],
-        ),
-        child: const Icon(Icons.add_rounded, color: Colors.white, size: 52),
       ),
     );
   }
