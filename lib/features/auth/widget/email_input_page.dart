@@ -3,9 +3,10 @@
 // User enters email → "Get code" calls POST /v1/auth/otp/request →
 // navigates to OTP input page (driven by auth_notifier state).
 //
-// Layout: a full-width hero illustration (user-provided art, fading into
-// the deep-space background) on top, the real email field + button + links
-// below.
+// Layout: the hero artwork fills the whole screen (BoxFit.cover — the art is
+// drawn wide on purpose so the centre survives any aspect ratio). The form
+// (email + button + links) is anchored to the bottom over a dark scrim, and
+// lifts above the keyboard when it opens.
 
 import 'dart:math' as math;
 
@@ -29,6 +30,7 @@ class EmailInputPage extends HookConsumerWidget {
     final theme = Theme.of(context);
     final emailController = useTextEditingController();
     final isSubmitting = useState(false);
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
     Future<void> submit() async {
       final email = emailController.text.trim();
@@ -60,110 +62,113 @@ class EmailInputPage extends HookConsumerWidget {
 
     return Scaffold(
       backgroundColor: Cosmic.deepest,
-      body: SafeArea(
-        bottom: false,
-        child: SingleChildScrollView(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom + 16),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
+      // Keep the background full-bleed when the keyboard opens; we lift the
+      // form ourselves via the bottom inset below.
+      resizeToAvoidBottomInset: false,
+      body: Stack(
+        children: [
+          // Full-screen hero. Drawn wide on purpose: cover keeps the centre
+          // (figure + orb) on any phone/tablet aspect ratio.
+          Positioned.fill(
+            child: Image.asset(
+              'assets/images/auth_hero.jpg',
+              fit: BoxFit.cover,
+              alignment: Alignment.topCenter,
+            ),
+          ),
+          // Pulsing radiance over the orb (approx centre).
+          const Positioned.fill(
+            child: Align(
+              alignment: Alignment(0, -0.12),
+              child: _OrbGlow(),
+            ),
+          ),
+          // Dark scrim toward the bottom so the form stays legible.
+          const Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Colors.transparent, Cosmic.deepest],
+                  stops: [0.0, 0.42, 0.9],
+                ),
+              ),
+            ),
+          ),
+          // Form, anchored to the bottom, lifting above the keyboard.
+          SafeArea(
+            child: AnimatedPadding(
+              duration: const Duration(milliseconds: 150),
+              padding: EdgeInsets.only(bottom: bottomInset),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Hero art, fading into the background at its bottom edge.
-                  Stack(
-                    children: [
-                      Image.asset(
-                        'assets/images/auth_hero.jpg',
-                        width: double.infinity,
-                        fit: BoxFit.fitWidth,
-                      ),
-                      // Pulsing radiance over the orb the figure holds.
-                      const Positioned.fill(
-                        child: Align(
-                          alignment: Alignment(0, -0.18),
-                          child: _OrbGlow(),
-                        ),
-                      ),
-                      const Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        height: 72,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [Colors.transparent, Cosmic.deepest],
+                  const Spacer(),
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 480),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              'Войдите по email',
+                              style: theme.textTheme.titleMedium?.copyWith(color: Cosmic.text2),
+                              textAlign: TextAlign.center,
                             ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          'Войдите по email',
-                          style: theme.textTheme.titleMedium?.copyWith(color: Cosmic.text2),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 20),
-                        _ShimmerField(
-                          child: TextField(
-                            controller: emailController,
-                            keyboardType: TextInputType.emailAddress,
-                            autocorrect: false,
-                            enableSuggestions: false,
-                            onSubmitted: (_) => submit(),
-                            decoration: InputDecoration(
-                              hintText: 'Email',
-                              prefixIcon: const Icon(Icons.mail_outline_rounded),
-                              filled: true,
-                              fillColor: Cosmic.section,
-                              // The shimmering ring is the border now.
-                              border: _noBorder,
-                              enabledBorder: _noBorder,
-                              focusedBorder: _noBorder,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        FilledButton(
-                          onPressed: isSubmitting.value ? null : submit,
-                          child: isSubmitting.value
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Text('Получить код'),
-                        ),
-                        const SizedBox(height: 8),
-                        TextButton(
-                          onPressed: () {
-                            // TODO(phase1): navigate to /auth/telegram for
-                            // existing bot-user binding flow (TZ §5.4).
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Скоро — привязка Telegram-аккаунта'),
+                            const SizedBox(height: 16),
+                            _ShimmerField(
+                              child: TextField(
+                                controller: emailController,
+                                keyboardType: TextInputType.emailAddress,
+                                autocorrect: false,
+                                enableSuggestions: false,
+                                onSubmitted: (_) => submit(),
+                                decoration: const InputDecoration(
+                                  hintText: 'Email',
+                                  prefixIcon: Icon(Icons.mail_outline_rounded),
+                                  filled: true,
+                                  fillColor: Cosmic.section,
+                                  border: _noBorder,
+                                  enabledBorder: _noBorder,
+                                  focusedBorder: _noBorder,
+                                ),
                               ),
-                            );
-                          },
-                          child: const Text('У меня уже есть Telegram-аккаунт'),
+                            ),
+                            const SizedBox(height: 14),
+                            FilledButton(
+                              onPressed: isSubmitting.value ? null : submit,
+                              child: isSubmitting.value
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  : const Text('Получить код'),
+                            ),
+                            const SizedBox(height: 6),
+                            TextButton(
+                              onPressed: () {
+                                // TODO(phase1): /auth/telegram bind flow (TZ §5.4).
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Скоро — привязка Telegram-аккаунта'),
+                                  ),
+                                );
+                              },
+                              child: const Text('У меня уже есть Telegram-аккаунт'),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
