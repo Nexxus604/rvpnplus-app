@@ -40,6 +40,11 @@ class HomePage extends HookConsumerWidget {
         ),
         actions: [
           IconButton(
+            tooltip: 'Серверы',
+            icon: const Icon(Icons.dns_outlined),
+            onPressed: () => GoRouter.of(context).push('/servers'),
+          ),
+          IconButton(
             tooltip: 'Маршрутизация',
             icon: const Icon(Icons.tune_rounded),
             onPressed: () =>

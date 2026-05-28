@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:hiddify/core/api/chat_api.dart';
 import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
+import 'package:hiddify/features/chat/widget/chat_bubble.dart';
 import 'package:hiddify/features/common/cosmic_background.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -148,10 +149,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       appBar: AppBar(
         title: Row(
           children: [
-            ClipOval(
-              child: Image.asset('assets/images/rocket_badge.png',
-                  width: 30, height: 30, fit: BoxFit.cover),
-            ),
+            const RocketMark(size: 32, pulse: false),
             const SizedBox(width: 10),
             const Text('Ассистент R-VPN+'),
           ],
@@ -303,10 +301,7 @@ class _EmptyChat extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            ClipOval(
-              child: Image.asset('assets/images/rocket_badge.png',
-                  width: 72, height: 72, fit: BoxFit.cover),
-            ),
+            const RocketMark(size: 76, pulse: true),
             const SizedBox(height: 20),
             const Text(
               'Спросите ассистента',
