@@ -9,7 +9,6 @@ import 'package:hiddify/core/preferences/preferences_provider.dart';
 import 'package:hiddify/core/utils/preferences_utils.dart';
 import 'package:hiddify/features/per_app_proxy/model/per_app_proxy_mode.dart';
 import 'package:hiddify/features/window/notifier/window_notifier.dart';
-import 'package:hiddify/utils/platform_utils.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 part 'general_preferences.g.dart';
@@ -83,8 +82,9 @@ abstract class Preferences {
 
   static final disableMemoryLimit = PreferencesNotifier.create<bool, bool>(
     "disable_memory_limit",
-    // disable memory limit on desktop by default
-    PlatformUtils.isDesktop,
+    // R-VPN+: disable the memory limit by default so the sing-box core is not
+    // OOM-killed mid-session (a cause of dropped connections, esp. screen-off).
+    true,
   );
 
   static final perAppProxyMode = PreferencesNotifier.create<PerAppProxyMode, String>(

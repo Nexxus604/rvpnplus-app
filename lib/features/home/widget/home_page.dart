@@ -194,8 +194,29 @@ class _BatteryOptimizationBanner extends ConsumerStatefulWidget {
 }
 
 class _BatteryOptimizationBannerState
-    extends ConsumerState<_BatteryOptimizationBanner> {
+    extends ConsumerState<_BatteryOptimizationBanner> with WidgetsBindingObserver {
   bool _dismissed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState s) {
+    // Returning from the system battery-optimization dialog: re-read the
+    // status so the banner disappears once the exemption is granted.
+    if (s == AppLifecycleState.resumed) {
+      ref.invalidate(batteryOptimizationNotifierProvider);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -677,8 +698,6 @@ class _ErrorView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final unauthorized = error is SubscriptionApiException &&
-        (error as SubscriptionApiException).code == SubscriptionErrorCode.unauthorized;
     final msg = error is SubscriptionApiException
         ? switch ((error as SubscriptionApiException).code) {
             SubscriptionErrorCode.unauthorized => 'Сессия истекла. Войдите заново.',
@@ -697,15 +716,13 @@ class _ErrorView extends ConsumerWidget {
           // "Повторить" re-runs the load, which first tries a token refresh —
           // so a recoverable session is restored without a full re-login.
           FilledButton(onPressed: onRetry, child: const Text('Повторить')),
-          // Only on a definitively expired session do we also offer an
-          // explicit re-login (clears tokens and goes to the email screen).
-          if (unauthorized) ...[
-            const Gap(8),
-            TextButton(
-              onPressed: () => ref.read(authNotifierProvider.notifier).logout(),
-              child: const Text('Войти заново'),
-            ),
-          ],
+          const Gap(8),
+          // Always offer a direct way out to the login screen, so the user
+          // never has to dig into Account → Выйти to escape a stuck state.
+          TextButton(
+            onPressed: () => ref.read(authNotifierProvider.notifier).logout(),
+            child: const Text('Войти заново'),
+          ),
         ],
       ),
     );
