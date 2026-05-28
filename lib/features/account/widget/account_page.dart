@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:hiddify/core/api/account_api.dart';
 import 'package:hiddify/core/api/auth_api.dart';
+import 'package:hiddify/core/auth/biometric_lock.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/common/cosmic_background.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -50,6 +51,8 @@ class AccountPage extends ConsumerWidget {
             _SubscriptionCard(subscription: auth.subscription),
             const SizedBox(height: 16),
             _DevicesShortcut(),
+            const SizedBox(height: 16),
+            const _BiometricToggle(),
             const SizedBox(height: 16),
             _ReferralStub(),
             const SizedBox(height: 24),
@@ -229,6 +232,37 @@ class _ReferralStub extends StatelessWidget {
         title: Text('Реферальная программа'),
         subtitle: Text('Скоро'),
         enabled: false,
+      ),
+    );
+  }
+}
+
+class _BiometricToggle extends ConsumerWidget {
+  const _BiometricToggle();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final enabled = ref.watch(biometricLockProvider).enabled;
+    return Card(
+      child: SwitchListTile(
+        secondary: const Icon(Icons.fingerprint_rounded),
+        title: const Text('Вход по биометрии'),
+        subtitle: const Text('Блокировать приложение отпечатком / Face ID'),
+        value: enabled,
+        onChanged: (on) async {
+          final messenger = ScaffoldMessenger.of(context);
+          final notifier = ref.read(biometricLockProvider.notifier);
+          if (on) {
+            final ok = await notifier.enable();
+            if (!ok) {
+              messenger.showSnackBar(const SnackBar(
+                content: Text('Биометрия недоступна или вход не подтверждён.'),
+              ));
+            }
+          } else {
+            await notifier.disable();
+          }
+        },
       ),
     );
   }

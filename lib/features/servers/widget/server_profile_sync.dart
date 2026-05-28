@@ -106,6 +106,16 @@ class ServerProfileSync {
     }
   }
 
+  /// Make an already-imported profile active by its id (used to restore the
+  /// previously-active profile after a speed test).
+  Future<void> setActive(String id) async {
+    final repo = _repo;
+    if (repo == null) return;
+    try {
+      await repo.setAsActive(id).run();
+    } catch (_) {}
+  }
+
   /// Delete the Hiddify profile whose URL matches [configUrl], if present.
   Future<void> removeProfileByUrl(String? configUrl) async {
     if (configUrl == null) return;

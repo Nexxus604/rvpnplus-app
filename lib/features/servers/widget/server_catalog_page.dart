@@ -10,10 +10,12 @@
 
 import 'package:flutter/material.dart';
 import 'package:gap/gap.dart';
+import 'package:go_router/go_router.dart';
 import 'package:hiddify/core/api/subscription_api.dart';
 import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/common/cosmic_background.dart';
+import 'package:hiddify/features/speedtest/speed_test_page.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 class ServerCatalogPage extends ConsumerStatefulWidget {
@@ -256,6 +258,20 @@ class _ServerRow extends StatelessWidget {
               ],
             ),
           ),
+          // ⚡ Speed test — only for activated servers (needs a live slot).
+          if (server.isActivated && server.slotId != null)
+            IconButton(
+              tooltip: 'Тест скорости',
+              icon: const Icon(Icons.speed_rounded, color: Cosmic.violetBright),
+              onPressed: () => GoRouter.of(context).push(
+                '/speedtest',
+                extra: SpeedTestArgs(
+                  code: server.code,
+                  slotId: server.slotId!,
+                  name: server.displayName,
+                ),
+              ),
+            ),
           if (pending)
             const Padding(
               padding: EdgeInsets.all(10),

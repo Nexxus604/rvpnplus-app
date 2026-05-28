@@ -4,6 +4,7 @@
 // (see ServerProfileSync); tapping connects, the trash icon deletes both here
 // and in the bot.
 
+import 'dart:io' show Platform;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -19,6 +20,7 @@ import 'package:hiddify/features/connection/notifier/connection_notifier.dart';
 import 'package:hiddify/features/home/widget/connection_button.dart';
 import 'package:hiddify/features/home/widget/connection_button_fx.dart';
 import 'package:hiddify/features/proxy/active/active_proxy_delay_indicator.dart';
+import 'package:hiddify/features/settings/notifier/battery_optimization/battery_optimizations_notifier.dart';
 import 'package:hiddify/features/servers/notifier/server_prefs.dart';
 import 'package:hiddify/features/servers/widget/ping_label.dart';
 import 'package:hiddify/features/servers/widget/server_profile_sync.dart';
@@ -126,6 +128,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                     ),
                   ),
                   Gap(8),
+                  _BatteryOptimizationBanner(),
                   Expanded(child: _MyServersSection()),
                 ],
               ),
@@ -175,6 +178,73 @@ class _SessionLockOverlay extends ConsumerWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Android only: nudges the user to exempt the app from battery optimization.
+/// Doze / MIUI background limits killing the VPN foreground service when the
+/// screen is off is the #1 cause of "the connection drops after a while".
+class _BatteryOptimizationBanner extends ConsumerStatefulWidget {
+  const _BatteryOptimizationBanner();
+  @override
+  ConsumerState<_BatteryOptimizationBanner> createState() =>
+      _BatteryOptimizationBannerState();
+}
+
+class _BatteryOptimizationBannerState
+    extends ConsumerState<_BatteryOptimizationBanner> {
+  bool _dismissed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!Platform.isAndroid || _dismissed) return const SizedBox.shrink();
+    // Default to "ignoring" while the check is loading so the banner doesn't
+    // flash before we know the real state.
+    final ignoring = ref.watch(batteryOptimizationNotifierProvider).valueOrNull ?? true;
+    if (ignoring) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+      decoration: BoxDecoration(
+        color: Cosmic.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFFFC857).withValues(alpha: .5)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.battery_alert_rounded, color: Color(0xFFFFC857), size: 22),
+          const Gap(10),
+          const Expanded(
+            child: Text(
+              'Чтобы VPN не отключался при заблокированном экране — разрешите '
+              'работу без ограничений батареи.',
+              style: TextStyle(color: Cosmic.text2, fontSize: 12, height: 1.35),
+            ),
+          ),
+          const Gap(6),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FilledButton(
+                onPressed: () => ref
+                    .read(batteryOptimizationNotifierProvider.notifier)
+                    .requestToIgnore(),
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+                child: const Text('Разрешить'),
+              ),
+              TextButton(
+                onPressed: () => setState(() => _dismissed = true),
+                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                child: const Text('Позже'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -232,12 +302,18 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
       final refreshed = await notifier.refreshAccess();
       final after = ref.read(authNotifierProvider);
       if (refreshed && after is AuthAuthenticated) {
-        final result = await _fetch(after.accessToken);
         ref.read(homeLockedProvider.notifier).state = false;
-        return result;
+        return await _fetch(after.accessToken);
       }
-      // Refresh failed — the session is genuinely gone. Lock the home.
-      ref.read(homeLockedProvider.notifier).state = true;
+      // Lock (and drop the tunnel) ONLY when the session is genuinely gone —
+      // i.e. the notifier logged us out (refresh token invalid / account
+      // inactive). A transient network failure during refresh keeps us
+      // AuthAuthenticated; in that case do NOT lock or abort the VPN — it's
+      // just an offline blip, and killing a working tunnel mid-use was a
+      // stability bug ("выбивает через время").
+      if (after is! AuthAuthenticated) {
+        ref.read(homeLockedProvider.notifier).state = true;
+      }
       rethrow;
     }
   }
