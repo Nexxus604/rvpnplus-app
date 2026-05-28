@@ -28,6 +28,11 @@ abstract final class Cosmic {
   static const onSuccess = Color(0xFF00261A);
   static const error = Color(0xFFFF1D38);
 
+  // Connection FX — "cosmic blue" when the tunnel is up, plus an electric
+  // highlight for the arcs/lightning around the connect button.
+  static const connectedBlue = Color(0xFF4AA8FF); // VPN connected glow / glyph
+  static const electric = Color(0xFF9FE0FF); // electric arc highlight
+
   static const fontFamily = 'Inter';
 
   /// Fixed cosmic dark scheme — ignores Material-You so the brand look is

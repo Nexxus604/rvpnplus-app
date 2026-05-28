@@ -115,14 +115,14 @@ class MyAdaptiveLayout extends HookConsumerWidget {
                           onDestinationSelected: (index) => _onTap(context, index),
                         ),
                       ),
-                      // Round, pulsing AI rocket — over the 3rd slot's icon area
-                      // (top of the bar), so it stands out without covering
-                      // content or being clipped by the system nav.
+                      // Big pulsing support rocket — floats FAB-style above
+                      // the 3rd slot so it stands out; the "Поддержка" label
+                      // stays visible under it. Clip.none lets it overflow.
                       Positioned(
-                        left: slotCenter - 25,
-                        top: 4,
+                        left: slotCenter - 42,
+                        top: -20,
                         child: RocketMark(
-                          size: 50,
+                          size: 84,
                           onTap: () => GoRouter.of(context).push('/chat'),
                         ),
                       ),

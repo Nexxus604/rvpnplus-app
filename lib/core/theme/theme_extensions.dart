@@ -11,10 +11,10 @@ class ConnectionButtonTheme extends ThemeExtension<ConnectionButtonTheme> {
     connectedColor: Color(0xFF44a334),
   );
 
-  // R-VPN+ cosmic: violet when idle, mint-green when connected.
+  // R-VPN+ cosmic: violet when idle, cosmic-blue when connected.
   static const ConnectionButtonTheme cosmic = ConnectionButtonTheme(
     idleColor: Color(0xFF6239EC),
-    connectedColor: Color(0xFF2FE6A7),
+    connectedColor: Color(0xFF4AA8FF),
   );
 
   @override

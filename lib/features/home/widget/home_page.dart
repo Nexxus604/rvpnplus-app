@@ -4,6 +4,8 @@
 // (see ServerProfileSync); tapping connects, the trash icon deletes both here
 // and in the bot.
 
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
@@ -13,6 +15,7 @@ import 'package:hiddify/core/router/bottom_sheets/bottom_sheets_notifier.dart';
 import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/common/cosmic_background.dart';
+import 'package:hiddify/features/connection/notifier/connection_notifier.dart';
 import 'package:hiddify/features/home/widget/connection_button.dart';
 import 'package:hiddify/features/home/widget/connection_button_fx.dart';
 import 'package:hiddify/features/proxy/active/active_proxy_delay_indicator.dart';
@@ -23,12 +26,41 @@ import 'package:hiddify/features/servers/widget/server_profile_sync.dart';
 import 'package:hiddify/gen/assets.gen.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
-class HomePage extends HookConsumerWidget {
+/// True once the session is detected as expired (an authed call returned 401
+/// and the refresh failed). While set, the whole home screen is locked: the
+/// connect button and servers are greyed out and only "Войти" works, and the
+/// tunnel is forced down — a logged-out user must not stay connected.
+final homeLockedProvider = StateProvider<bool>((ref) => false);
+
+class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends ConsumerState<HomePage> {
+  @override
+  void initState() {
+    super.initState();
+    // Fresh mount (e.g. just after a re-login) starts unlocked; the first
+    // server load re-locks it if the session is still bad.
+    Future.microtask(() {
+      if (mounted) ref.read(homeLockedProvider.notifier).state = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final t = ref.watch(translationsProvider).requireValue;
+    final locked = ref.watch(homeLockedProvider);
+
+    // The moment the session locks, drop the tunnel.
+    ref.listen<bool>(homeLockedProvider, (prev, next) {
+      if (next && !(prev ?? false)) {
+        ref.read(connectionNotifierProvider.notifier).abortConnection();
+      }
+    });
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -42,54 +74,106 @@ class HomePage extends HookConsumerWidget {
             Text(t.common.appTitle),
           ],
         ),
-        actions: [
-          IconButton(
-            tooltip: 'Серверы',
-            icon: const Icon(Icons.dns_outlined),
-            onPressed: () => GoRouter.of(context).push('/servers/catalog'),
+        // While locked, strip the toolbar actions — nothing but "Войти" works.
+        actions: locked
+            ? null
+            : [
+                IconButton(
+                  tooltip: 'Серверы',
+                  icon: const Icon(Icons.dns_outlined),
+                  onPressed: () => GoRouter.of(context).push('/servers/catalog'),
+                ),
+                IconButton(
+                  tooltip: 'Маршрутизация',
+                  icon: const Icon(Icons.tune_rounded),
+                  onPressed: () => ref
+                      .read(bottomSheetsNotifierProvider.notifier)
+                      .showQuickSettings(),
+                ),
+                IconButton(
+                  tooltip: 'Добавить профиль',
+                  icon: const Icon(Icons.add_rounded),
+                  onPressed: () => ref
+                      .read(bottomSheetsNotifierProvider.notifier)
+                      .showAddProfile(),
+                ),
+                IconButton(
+                  tooltip: 'Аккаунт',
+                  icon: const Icon(Icons.account_circle_outlined),
+                  onPressed: () => GoRouter.of(context).push('/account'),
+                ),
+                const Gap(4),
+              ],
+      ),
+      body: Stack(
+        children: [
+          const CosmicBackground(
+            child: SafeArea(
+              child: Column(
+                children: [
+                  Padding(
+                    padding: EdgeInsets.only(top: 8, bottom: 4),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          height: 220,
+                          child: Center(
+                            child: ConnectionButtonFx(child: ConnectionButton()),
+                          ),
+                        ),
+                        ActiveProxyDelayIndicator(),
+                      ],
+                    ),
+                  ),
+                  Gap(8),
+                  Expanded(child: _MyServersSection()),
+                ],
+              ),
+            ),
           ),
-          IconButton(
-            tooltip: 'Маршрутизация',
-            icon: const Icon(Icons.tune_rounded),
-            onPressed: () =>
-                ref.read(bottomSheetsNotifierProvider.notifier).showQuickSettings(),
-          ),
-          IconButton(
-            tooltip: 'Добавить профиль',
-            icon: const Icon(Icons.add_rounded),
-            onPressed: () =>
-                ref.read(bottomSheetsNotifierProvider.notifier).showAddProfile(),
-          ),
-          IconButton(
-            tooltip: 'Аккаунт',
-            icon: const Icon(Icons.account_circle_outlined),
-            onPressed: () => GoRouter.of(context).push('/account'),
-          ),
-          const Gap(4),
+          if (locked) const Positioned.fill(child: _SessionLockOverlay()),
         ],
       ),
-      body: const CosmicBackground(
-        child: SafeArea(
-          child: Column(
-            children: [
-              Padding(
-                padding: EdgeInsets.only(top: 8, bottom: 4),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      height: 220,
-                      child: Center(
-                        child: ConnectionButtonFx(child: ConnectionButton()),
-                      ),
-                    ),
-                    ActiveProxyDelayIndicator(),
-                  ],
+    );
+  }
+}
+
+/// Full-screen lock shown when the session has expired: a blurred grey scrim
+/// that swallows all taps to the content behind, leaving only "Войти".
+class _SessionLockOverlay extends ConsumerWidget {
+  const _SessionLockOverlay();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {}, // absorb taps meant for the (now disabled) UI behind
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+        child: Container(
+          color: Cosmic.deepest.withValues(alpha: 0.78),
+          alignment: Alignment.center,
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.lock_outline_rounded, size: 52, color: Cosmic.text2),
+                const Gap(16),
+                const Text(
+                  'Сессия истекла.\nВойдите заново, чтобы продолжить.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Cosmic.text, fontSize: 16, height: 1.4),
                 ),
-              ),
-              Gap(8),
-              Expanded(child: _MyServersSection()),
-            ],
+                const Gap(20),
+                FilledButton.icon(
+                  onPressed: () => ref.read(authNotifierProvider.notifier).logout(),
+                  icon: const Icon(Icons.login_rounded, size: 18),
+                  label: const Text('Войти'),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -112,14 +196,10 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
     _future = _load();
   }
 
-  Future<MyServersResult> _load() async {
-    final auth = ref.read(authNotifierProvider);
-    if (auth is! AuthAuthenticated) {
-      throw const SubscriptionApiException(
-          SubscriptionErrorCode.unauthorized, 'Not logged in');
-    }
-    final result =
-        await ref.read(subscriptionApiProvider).myServers(accessToken: auth.accessToken);
+  Future<MyServersResult> _fetch(String accessToken) async {
+    final result = await ref
+        .read(subscriptionApiProvider)
+        .myServers(accessToken: accessToken);
     final currentUrls =
         result.servers.map((s) => s.configUrl).whereType<String>().toSet();
     // The list is authoritative only with an active subscription and at least
@@ -132,6 +212,35 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
         .read(serverProfileSyncProvider)
         .reconcile(currentUrls, authoritative: authoritative);
     return result;
+  }
+
+  Future<MyServersResult> _load() async {
+    final notifier = ref.read(authNotifierProvider.notifier);
+    final auth = ref.read(authNotifierProvider);
+    if (auth is! AuthAuthenticated) {
+      ref.read(homeLockedProvider.notifier).state = true;
+      throw const SubscriptionApiException(
+          SubscriptionErrorCode.unauthorized, 'Not logged in');
+    }
+    try {
+      final result = await _fetch(auth.accessToken);
+      ref.read(homeLockedProvider.notifier).state = false;
+      return result;
+    } on SubscriptionApiException catch (e) {
+      if (e.code != SubscriptionErrorCode.unauthorized) rethrow;
+      // Access token rejected — try to refresh once before giving up so a
+      // long-lived session survives an expired access token silently.
+      final refreshed = await notifier.refreshAccess();
+      final after = ref.read(authNotifierProvider);
+      if (refreshed && after is AuthAuthenticated) {
+        final result = await _fetch(after.accessToken);
+        ref.read(homeLockedProvider.notifier).state = false;
+        return result;
+      }
+      // Refresh failed — the session is genuinely gone. Lock the home.
+      ref.read(homeLockedProvider.notifier).state = true;
+      rethrow;
+    }
   }
 
   void _reload() => setState(() => _future = _load());
