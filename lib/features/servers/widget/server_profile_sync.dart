@@ -44,6 +44,15 @@ class ServerProfileSync {
     } catch (_) {/* surfaced to user via the Servers screen snackbar */}
   }
 
+  /// Import a raw AmneziaWG .conf as a local profile (sing-box `awg`).
+  /// Returns true on success so the caller can surface a clear error.
+  Future<bool> importAwgConfig(String content) async {
+    final repo = _repo;
+    if (repo == null) return false;
+    final result = await repo.addLocal(content).run();
+    return result.isRight();
+  }
+
   /// Delete the Hiddify profile whose URL matches [configUrl], if present.
   Future<void> removeProfileByUrl(String? configUrl) async {
     if (configUrl == null) return;

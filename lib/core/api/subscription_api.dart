@@ -219,6 +219,39 @@ class SubscriptionApi {
     }
   }
 
+  /// AmneziaWG .conf for an active server slot (the app imports it as a
+  /// local profile; sing-box runs it as an `awg` outbound).
+  Future<String> awgConfig({
+    required String accessToken,
+    required int slotId,
+  }) async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/subscription/servers/$slotId/awg',
+        options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+      );
+      if (response.statusCode == 200) {
+        return response.data!['content'] as String;
+      }
+      if (response.statusCode == 401) {
+        throw const SubscriptionApiException(
+            SubscriptionErrorCode.unauthorized, 'Access token rejected');
+      }
+      final detail = response.data?['detail'];
+      final msg = detail is Map ? (detail['message'] as String?) : null;
+      throw SubscriptionApiException(
+          SubscriptionErrorCode.unknown, msg ?? 'HTTP ${response.statusCode}');
+    } on DioException catch (e) {
+      final detail = e.response?.data is Map ? e.response?.data['detail'] : null;
+      final msg = detail is Map ? (detail['message'] as String?) : null;
+      if (msg != null) {
+        throw SubscriptionApiException(SubscriptionErrorCode.unknown, msg);
+      }
+      throw SubscriptionApiException(
+          SubscriptionErrorCode.network, e.message ?? 'Network error');
+    }
+  }
+
   Future<MyServersResult> myServers({required String accessToken}) async {
     try {
       final response = await _dio.get<Map<String, dynamic>>(

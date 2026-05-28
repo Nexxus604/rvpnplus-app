@@ -219,15 +219,34 @@ class _ServerCard extends ConsumerWidget {
                 ],
               ),
             ),
-            IconButton(
-              tooltip: 'Подключить',
-              icon: const Icon(Icons.add_circle, color: Cosmic.violetBright),
-              onPressed: reachable ? () => _connect(context, ref) : null,
-            ),
-            IconButton(
-              tooltip: 'Удалить',
-              icon: const Icon(Icons.delete_outline, color: Cosmic.text2),
-              onPressed: () => _delete(context, ref),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: Cosmic.text2),
+              color: Cosmic.cardHi,
+              onSelected: (v) {
+                switch (v) {
+                  case 'vless':
+                    _connect(context, ref);
+                  case 'awg':
+                    _connectAwg(context, ref);
+                  case 'delete':
+                    _delete(context, ref);
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'vless',
+                  enabled: reachable,
+                  child: const Text('Подключить (VLESS)'),
+                ),
+                const PopupMenuItem(
+                  value: 'awg',
+                  child: Text('Подключить (AmneziaWG)'),
+                ),
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Text('Удалить', style: TextStyle(color: Cosmic.error)),
+                ),
+              ],
             ),
           ],
         ),
@@ -244,6 +263,38 @@ class _ServerCard extends ConsumerWidget {
     messenger.showSnackBar(SnackBar(
       content: Text('${server.city ?? server.code} добавлен — нажмите «Подключить» вверху'),
     ));
+  }
+
+  Future<void> _connectAwg(BuildContext context, WidgetRef ref) async {
+    final auth = ref.read(authNotifierProvider);
+    if (auth is! AuthAuthenticated) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(SnackBar(
+      content: Text('Готовлю AmneziaWG для ${server.city ?? server.code}…'),
+      duration: const Duration(seconds: 6),
+    ));
+    try {
+      final conf = await ref
+          .read(subscriptionApiProvider)
+          .awgConfig(accessToken: auth.accessToken, slotId: server.slotId);
+      final ok = await ref.read(serverProfileSyncProvider).importAwgConfig(conf);
+      if (!context.mounted) return;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(
+        content: Text(ok
+            ? '${server.city ?? server.code} (AmneziaWG) добавлен — нажмите «Подключить» вверху'
+            : 'Не удалось импортировать AmneziaWG-конфиг'),
+      ));
+    } on SubscriptionApiException catch (e) {
+      if (!context.mounted) return;
+      messenger.hideCurrentSnackBar();
+      final msg = switch (e.code) {
+        SubscriptionErrorCode.unauthorized => 'Сессия истекла. Войдите заново.',
+        SubscriptionErrorCode.network => 'Нет связи с сервером.',
+        SubscriptionErrorCode.unknown => e.message,
+      };
+      messenger.showSnackBar(SnackBar(content: Text(msg)));
+    }
   }
 
   Future<void> _delete(BuildContext context, WidgetRef ref) async {
