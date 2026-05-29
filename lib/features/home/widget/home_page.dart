@@ -301,7 +301,11 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
   @override
   void initState() {
     super.initState();
-    _future = _load();
+    // Defer so _load's synchronous part (which may set homeLockedProvider on
+    // a not-authenticated mount) runs AFTER this frame — mutating a provider
+    // during build/initState throws. Also ordered after the parent's unlock
+    // reset microtask, so a genuinely-expired session still re-locks.
+    _future = Future.microtask(_load);
   }
 
   Future<MyServersResult> _fetch(String accessToken) async {

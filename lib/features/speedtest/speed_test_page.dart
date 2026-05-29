@@ -32,6 +32,15 @@ class SpeedTestPage extends ConsumerStatefulWidget {
 class _SpeedTestPageState extends ConsumerState<SpeedTestPage> {
   SpeedProgress? _progress;
   bool _running = false;
+  SpeedTestRunner? _runner;
+
+  @override
+  void dispose() {
+    // Stop the runner so it doesn't keep driving the VPN / touch a disposed
+    // ref after the user leaves mid-test.
+    _runner?.cancel();
+    super.dispose();
+  }
 
   bool get _busy =>
       _running &&
@@ -45,6 +54,7 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage> {
       _progress = const SpeedProgress(phase: SpeedPhase.preparing);
     });
     final runner = SpeedTestRunner(ref, serverCode: widget.args.code, slotId: widget.args.slotId);
+    _runner = runner;
     try {
       await runner.run((p) {
         if (mounted) setState(() => _progress = p);

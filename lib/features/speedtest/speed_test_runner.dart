@@ -84,6 +84,12 @@ class SpeedTestRunner {
   GeoInfo? _toGeo;
   double _progress = 0;
   late void Function(SpeedProgress) _emit;
+  // Captured once while the page is mounted, so the long connect/disconnect
+  // sequence never reads a possibly-disposed WidgetRef. The page calls
+  // [cancel] from its dispose(); the loop then short-circuits before any ref.
+  ConnectionNotifier? _conn;
+  bool _cancelled = false;
+  void cancel() => _cancelled = true;
 
   void _report(SpeedPhase phase, {double? liveMbps, String? note, String? recommendation}) {
     _emit(SpeedProgress(
@@ -111,6 +117,7 @@ class SpeedTestRunner {
     final api = _ref.read(subscriptionApiProvider);
     final geo = _ref.read(geoApiProvider);
     final sync = _ref.read(serverProfileSyncProvider);
+    _conn = _ref.read(connectionNotifierProvider.notifier);
 
     // Resolve configs + the user's own geolocation, all while still
     // disconnected (so "from" geo is the real user IP, not the exit).
@@ -138,6 +145,7 @@ class SpeedTestRunner {
       _report(SpeedPhase.failed, note: 'Не удалось получить конфигурации сервера.');
       return;
     }
+    if (_cancelled) return;
 
     final prevActiveId = _ref.read(activeProfileProvider).valueOrNull?.id;
 
@@ -148,6 +156,7 @@ class SpeedTestRunner {
     final n = steps.length;
 
     for (var i = 0; i < n; i++) {
+      if (_cancelled) return;
       final step = steps[i];
       _progress = 0.08 + (i / n) * 0.86;
       _report(step.phase);
@@ -162,6 +171,7 @@ class SpeedTestRunner {
       await _ensureDisconnected();
     }
 
+    if (_cancelled) return;
     _progress = 0.97;
     _report(SpeedPhase.finishing);
     if (prevActiveId != null) await sync.setActive(prevActiveId);
@@ -171,7 +181,10 @@ class SpeedTestRunner {
   }
 
   Future<ProtocolResult> _measure(String protocol, SpeedPhase phase, int i, int n) async {
-    final conn = _ref.read(connectionNotifierProvider.notifier);
+    final conn = _conn;
+    if (_cancelled || conn == null) {
+      return ProtocolResult(protocol: protocol, connected: false, error: 'Отменено');
+    }
     final base = 0.08 + (i / n) * 0.86;
     final span = 0.86 / n;
 
@@ -264,7 +277,8 @@ class SpeedTestRunner {
       }, _connectTimeout);
 
   Future<void> _ensureDisconnected() async {
-    await _ref.read(connectionNotifierProvider.notifier).abortConnection();
+    if (_cancelled) return;
+    await _conn?.abortConnection();
     await _waitFor(() {
       final st = _ref.read(connectionNotifierProvider).valueOrNull;
       return st?.isDisconnected ?? false;
@@ -274,10 +288,11 @@ class SpeedTestRunner {
   Future<bool> _waitFor(bool Function() cond, Duration timeout) async {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
+      if (_cancelled) return false; // page gone — don't touch ref via cond()
       if (cond()) return true;
       await Future<void>.delayed(const Duration(milliseconds: 400));
     }
-    return cond();
+    return _cancelled ? false : cond();
   }
 
   String _recommend() {
