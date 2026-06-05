@@ -103,51 +103,65 @@ class AuthNotifier extends Notifier<AuthState> {
     return const AuthInitial();
   }
 
-  /// Called once on app start: load persisted tokens, hydrate state
-  /// with cached Account, then validate against /v1/account. Any
-  /// failure from secure storage falls to AuthUnauthenticated rather
-  /// than leaving the app stuck on AuthInitial forever (reviewer F5).
+  /// Called once on app start: load persisted tokens, hydrate state with
+  /// cached Account, then validate against /v1/account.
+  ///
+  /// Hardened against silent log-outs:
+  ///   • Secure-storage reads are retried on transient failure (Android
+  ///     Keystore on MIUI / libsecret sometimes throws right after cold start
+  ///     — we do NOT log the user out for that any more).
+  ///   • Tokens are NEVER wiped just because the account meta in
+  ///     SharedPreferences is missing — the tokens are the source of truth
+  ///     and the meta is re-fetched from /v1/account. The old wipe path
+  ///     silently logged users out when prefs got cleared but secure
+  ///     storage still held valid tokens.
   Future<void> _bootstrap() async {
     try {
       final store = ref.read(secureTokenStoreProvider);
-      final tokens = await store.read();
+      StoredTokens? tokens;
+      try {
+        tokens = await store.read();
+      } catch (_) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        try {
+          tokens = await store.read();
+        } catch (_) {
+          tokens = null;
+        }
+      }
       final prefs = await SharedPreferences.getInstance();
       final cachedEmail = prefs.getString(_kAccountEmailKey);
       final cachedId = prefs.getInt(_kAccountIdKey);
       final cachedVerified = prefs.getBool(_kAccountVerifiedKey) ?? false;
       final cachedHasTg = prefs.getBool(_kAccountHasTgKey) ?? false;
 
-      // Atomicity guard: tokens without account meta = half-persisted
-      // state (crash between secure-storage and prefs writes). Wipe the
-      // orphans so cold-starts converge to a clean AuthUnauthenticated.
-      // Reviewer F6.
-      if (tokens != null && (cachedEmail == null || cachedId == null)) {
-        await store.clear();
-        state = const AuthUnauthenticated();
-        return;
-      }
-      if (tokens == null || cachedEmail == null || cachedId == null) {
+      if (tokens == null) {
         state = const AuthUnauthenticated();
         return;
       }
 
+      // Tokens are valid even if the meta cache is empty (prefs cleared,
+      // partial restore, fresh install over a Keystore-restored backup).
+      // Keep the tokens; /v1/account will repopulate the meta.
       state = AuthAuthenticated(
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         account: Account(
-          id: cachedId,
-          email: cachedEmail,
+          id: cachedId ?? 0,
+          email: cachedEmail ?? '',
           emailVerified: cachedVerified,
           locale: 'ru',
           hasTelegram: cachedHasTg,
         ),
       );
-      // Best-effort probe; never fatal to boot.
       await _probeAccount();
     } catch (e) {
-      // Keychain locked, libsecret missing on minimal Linux, corrupted
-      // prefs DB. Either way: degrade gracefully to login screen.
-      state = AuthUnauthenticated(lastError: 'Failed to restore session: $e');
+      // Only fall through to login if we couldn't restore anything. If a
+      // previous run had already authenticated this notifier we keep it
+      // — never auto-logout on a transient platform error.
+      if (state is! AuthAuthenticated) {
+        state = AuthUnauthenticated(lastError: 'Failed to restore session: $e');
+      }
     }
   }
 

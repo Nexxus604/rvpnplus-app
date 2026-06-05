@@ -13,7 +13,25 @@ import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/features/common/cosmic_background.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:local_auth_android/local_auth_android.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+const _kAuthMessages = <AuthMessages>[
+  AndroidAuthMessages(
+    signInTitle: 'Разблокировка R-VPN+',
+    biometricHint: '',
+    biometricNotRecognized: 'Не распознано — попробуйте ещё раз',
+    biometricSuccess: 'Готово',
+    biometricRequiredTitle: 'Биометрия не настроена',
+    cancelButton: 'Отмена',
+    deviceCredentialsRequiredTitle: 'Введите код устройства',
+    deviceCredentialsSetupDescription:
+        'Чтобы использовать код — установите блокировку экрана (PIN/пароль) в настройках телефона.',
+    goToSettingsButton: 'Открыть настройки',
+    goToSettingsDescription:
+        'Чтобы использовать вход — добавьте отпечаток / Face ID / код в настройках телефона.',
+  ),
+];
 
 const _kBiometricEnabledKey = 'biometric_lock_enabled';
 
@@ -45,9 +63,12 @@ class BiometricLock extends Notifier<BiometricState> {
   // still unlock with their screen-lock code.
   Future<bool> _auth0(String reason) => _auth.authenticate(
         localizedReason: reason,
+        authMessages: _kAuthMessages,
         options: const AuthenticationOptions(
           stickyAuth: true,
-          biometricOnly: false,
+          // biometricOnly: false (default) — allows the system PIN/pattern/
+          // password fallback so users without an enrolled fingerprint can
+          // still unlock with the phone's screen-lock code.
         ),
       );
 
@@ -191,13 +212,13 @@ class _BiometricGateState extends ConsumerState<BiometricGate>
   }
 }
 
-class _LockScreen extends StatelessWidget {
+class _LockScreen extends ConsumerWidget {
   const _LockScreen({required this.onUnlock, this.error});
   final VoidCallback onUnlock;
   final String? error;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Material(
       color: Cosmic.deepest,
       child: CosmicBackground(
@@ -230,6 +251,16 @@ class _LockScreen extends StatelessWidget {
                   onPressed: onUnlock,
                   icon: const Icon(Icons.lock_open_rounded, size: 18),
                   label: const Text('Разблокировать'),
+                ),
+                const SizedBox(height: 8),
+                // Always-available escape: never leave the user permanently
+                // stuck if biometric / device-credential refuses to authenticate
+                // (MIUI quirks, no screen lock set, etc.). Disabling the lock
+                // doesn't log them out — the session stays intact.
+                TextButton(
+                  onPressed: () =>
+                      ref.read(biometricLockProvider.notifier).disable(),
+                  child: const Text('Отключить блокировку'),
                 ),
               ],
             ),
