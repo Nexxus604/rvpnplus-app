@@ -55,6 +55,9 @@ dependencies:
   # Direct (in addition to local_auth's transitive) so we can import
   # AndroidAuthMessages for a Russian system prompt.
   local_auth_android: ^1.0.0
+  # Used by myGeoProvider to invalidate the cached real-IP/location on a
+  # network identity change (Wi-Fi ↔ LTE handover, SSID switch).
+  connectivity_plus: ^6.0.5
 
   url_launcher: ^6.2.5
   vclibs: ^0.1.2

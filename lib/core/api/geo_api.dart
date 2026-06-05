@@ -1,10 +1,43 @@
 // Client for /v1/geo — geolocates the caller's IP (city / country / ISP).
-// Called while disconnected for the user's own location, and while connected
-// (through the tunnel) for the VPN exit's location.
+// Two surfaces:
+//   • lookup()       — legacy best-effort, returns null on any failure.
+//                       Used by the speed-test runner (where any failure is
+//                       just "no geo this run").
+//   • lookupTyped()  — typed result distinguishing auth vs network vs server
+//                       errors, so the Home-chip and Account-card widgets can
+//                       render the right state ("hide" vs "недоступно" vs
+//                       "Определяю…") instead of conflating everything to "—".
 
 import 'package:dio/dio.dart';
 import 'package:hiddify/core/api/app_api.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+
+/// Typed result of a /v1/geo call used by [GeoApi.lookupTyped].
+sealed class GeoLookupResult {
+  const GeoLookupResult();
+}
+
+class GeoLookupOk extends GeoLookupResult {
+  final GeoInfo info;
+  const GeoLookupOk(this.info);
+}
+
+/// The user is not authenticated (or token rejected). Widgets render nothing.
+class GeoLookupAuthExpired extends GeoLookupResult {
+  const GeoLookupAuthExpired();
+}
+
+/// Transport-level failure (offline, DNS, TLS, connection refused, timeout).
+class GeoLookupNetworkError extends GeoLookupResult {
+  const GeoLookupNetworkError();
+}
+
+/// Server replied but with a non-2xx (or an empty all-null body that we can't
+/// usefully show).
+class GeoLookupServerError extends GeoLookupResult {
+  final int statusCode;
+  const GeoLookupServerError(this.statusCode);
+}
 
 class GeoInfo {
   final String? ip;
@@ -60,6 +93,45 @@ class GeoApi {
       }
     } catch (_) {/* best-effort — UI shows a dash if geo is unavailable */}
     return null;
+  }
+
+  /// Typed variant used by [myGeoProvider]. Always returns — caller pattern-
+  /// matches on the result instead of nursing nulls.
+  Future<GeoLookupResult> lookupTyped({required String accessToken}) async {
+    try {
+      final r = await _dio.get<Map<String, dynamic>>(
+        '/geo',
+        options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+      );
+      final code = r.statusCode ?? 0;
+      if (code == 200 && r.data != null) {
+        final info = GeoInfo.fromJson(r.data!);
+        // Server replied 200 but with nothing useful — treat as a server
+        // error so the UI shows the недоступно-with-retry affordance rather
+        // than a misleading bare dash.
+        if (info.ip == null && info.city == null && info.country == null) {
+          return const GeoLookupServerError(200);
+        }
+        return GeoLookupOk(info);
+      }
+      if (code == 401 || code == 403) return const GeoLookupAuthExpired();
+      return GeoLookupServerError(code);
+    } on DioException catch (e) {
+      // All transport failures funnel here.
+      switch (e.type) {
+        case DioExceptionType.connectionError:
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.sendTimeout:
+        case DioExceptionType.receiveTimeout:
+          return const GeoLookupNetworkError();
+        default:
+          // Per app_api.dart's validateStatus<600, non-2xx arrives here only
+          // when Dio still raises (rare). Treat as a network blip.
+          return const GeoLookupNetworkError();
+      }
+    } catch (_) {
+      return const GeoLookupNetworkError();
+    }
   }
 }
 

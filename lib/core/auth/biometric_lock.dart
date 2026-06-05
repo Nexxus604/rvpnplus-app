@@ -40,6 +40,10 @@ class BiometricState {
   final bool unlocked;
   final String? error;
   const BiometricState({required this.enabled, required this.unlocked, this.error});
+
+  /// True when the lock is currently engaged (turned on AND not unlocked).
+  /// Convenience accessor for providers/widgets that want to gate on lock.
+  bool get locked => enabled && !unlocked;
 }
 
 class BiometricLock extends Notifier<BiometricState> {

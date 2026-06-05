@@ -1,10 +1,16 @@
 // HTTP client for the R-VPN+ App API at https://api.rvpn.app/v1/.
 //
 // This is the entry point for all app↔backend communication: auth (OTP),
-// subscription, nodes, payments, chat, push. JWT access token is
-// injected automatically once the user is authenticated (Phase 1).
+// subscription, nodes, payments, chat, push. The JWT access token is injected
+// per-call by each typed client (subscription_api, account_api, …), and the
+// global [_JwtAuthInterceptor] watches for 401s, refreshes the token via
+// [AuthNotifier.refreshAccess], and transparently retries the original
+// request once. Without this interceptor every typed client would silently
+// log the user out the first time the 15-min access token expired (audit
+// finding H14).
 
 import 'package:dio/dio.dart';
+import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 /// Base URL of our REST API. Hardcoded — we never proxy this through
@@ -41,8 +47,62 @@ final appApiClientProvider = Provider<Dio>((ref) {
     ),
   );
 
-  // JWT auth interceptor — slot in when we implement login (Phase 1).
-  // dio.interceptors.add(_JwtAuthInterceptor(ref));
+  dio.interceptors.add(_JwtAuthInterceptor(ref, dio));
 
   return dio;
 });
+
+/// Refresh-on-401 + retry-once. Marks the retried request with a sentinel
+/// header so the second pass through the interceptor short-circuits even on
+/// another 401 — no infinite loop.
+class _JwtAuthInterceptor extends Interceptor {
+  _JwtAuthInterceptor(this._ref, this._dio);
+  final Ref _ref;
+  final Dio _dio;
+
+  static const _retryHeader = 'X-Rvpnplus-Auth-Retried';
+
+  @override
+  void onResponse(Response response, ResponseInterceptorHandler handler) async {
+    if (response.statusCode != 401) {
+      handler.next(response);
+      return;
+    }
+    final ro = response.requestOptions;
+    // Don't bounce 401s from the auth endpoints — refreshing in response to a
+    // refresh failure is the definition of a loop, and verify/request 401s
+    // mean the OTP itself is wrong (a refresh would not fix that).
+    if (ro.path.contains('/auth/')) {
+      handler.next(response);
+      return;
+    }
+    if (ro.headers[_retryHeader] == '1') {
+      // Already retried once — surface the 401 to the caller.
+      handler.next(response);
+      return;
+    }
+    final notifier = _ref.read(authNotifierProvider.notifier);
+    final ok = await notifier.refreshAccess();
+    if (!ok) {
+      handler.next(response);
+      return;
+    }
+    final auth = _ref.read(authNotifierProvider);
+    if (auth is! AuthAuthenticated) {
+      handler.next(response);
+      return;
+    }
+    // Replay the original request with the new access token + retry marker.
+    final newHeaders = Map<String, dynamic>.from(ro.headers);
+    newHeaders['Authorization'] = 'Bearer ${auth.accessToken}';
+    newHeaders[_retryHeader] = '1';
+    final retryOptions = ro.copyWith(headers: newHeaders);
+    try {
+      final retry = await _dio.fetch<dynamic>(retryOptions);
+      handler.resolve(retry);
+    } catch (_) {
+      // Retry transport failed — surface the original 401 response.
+      handler.next(response);
+    }
+  }
+}

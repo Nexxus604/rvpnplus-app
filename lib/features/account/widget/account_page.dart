@@ -11,6 +11,7 @@ import 'package:hiddify/core/api/auth_api.dart';
 import 'package:hiddify/core/auth/biometric_lock.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/common/cosmic_background.dart';
+import 'package:hiddify/features/geo/widget/real_location_card.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 class AccountPage extends ConsumerWidget {
@@ -35,6 +36,8 @@ class AccountPage extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           children: [
             _AccountHeader(account: auth.account),
+            const SizedBox(height: 16),
+            const RealLocationCard(),
             const SizedBox(height: 16),
             if (!auth.account.hasTelegram) ...[
               Card(
@@ -91,7 +94,12 @@ class _AccountHeader extends StatelessWidget {
               radius: 28,
               backgroundColor: theme.colorScheme.primaryContainer,
               child: Text(
-                account.email.substring(0, 1).toUpperCase(),
+                // Guard against an empty email — the bootstrap placeholder
+                // path used to crash here with RangeError on substring(0,1)
+                // until /v1/account hydrated the real account.
+                account.email.isEmpty
+                    ? '?'
+                    : account.email.substring(0, 1).toUpperCase(),
                 style: theme.textTheme.headlineSmall?.copyWith(
                   color: theme.colorScheme.onPrimaryContainer,
                   fontWeight: FontWeight.w700,

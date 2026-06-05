@@ -317,10 +317,15 @@ class AuthNotifier extends Notifier<AuthState> {
     }
     final completer = Completer<bool>();
     _refreshInFlight = completer;
+    // Sets the completer once, ignoring stray double-completes if the same
+    // outcome arrives both via the success branch and via the finally net.
+    void settle(bool v) {
+      if (!completer.isCompleted) completer.complete(v);
+    }
     try {
       final current = state;
       if (current is! AuthAuthenticated) {
-        completer.complete(false);
+        settle(false);
         return false;
       }
       try {
@@ -331,7 +336,7 @@ class AuthNotifier extends Notifier<AuthState> {
         final after = state;
         if (after is! AuthAuthenticated ||
             after.refreshToken != current.refreshToken) {
-          completer.complete(false);
+          settle(false);
           return false;
         }
         await _persist(
@@ -346,7 +351,7 @@ class AuthNotifier extends Notifier<AuthState> {
           accessToken: result.accessToken,
           refreshToken: result.refreshToken,
         );
-        completer.complete(true);
+        settle(true);
         return true;
       } on AuthApiException catch (e) {
         // Reviewer F4: only force-logout on server-side rejection. A
@@ -356,25 +361,42 @@ class AuthNotifier extends Notifier<AuthState> {
             e.code == AuthErrorCode.accountInactive) {
           await logout();
           state = AuthUnauthenticated(lastError: e.message);
-          completer.complete(false);
+          settle(false);
           return false;
         }
         // Network / unknown — keep state, signal caller we didn't refresh.
-        completer.complete(false);
+        settle(false);
         return false;
       }
     } finally {
+      // Audit H01: ANY uncaught exception (Keystore/PlatformException, state
+      // error, ref disposed mid-await) used to leak the completer — every
+      // concurrent caller parked on _refreshInFlight!.future hung forever.
+      // Settle to `false` as a safety net so concurrent awaiters always
+      // unblock. The explicit `settle(true)` on the success path runs FIRST
+      // so success is reported correctly; this is purely a finally net.
+      settle(false);
       _refreshInFlight = null;
     }
   }
 
   Future<void> logout() async {
-    await ref.read(secureTokenStoreProvider).clear();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_kAccountEmailKey);
-    await prefs.remove(_kAccountIdKey);
-    await prefs.remove(_kAccountVerifiedKey);
-    await prefs.remove(_kAccountHasTgKey);
+    // Audit H11: logout used to leave the user trapped on the session-lock
+    // overlay if either of these storage operations threw (Keystore briefly
+    // down on MIUI, prefs corrupted). Always flip the state at the end so
+    // the router redirects to /auth/email even if persistence fails — worst
+    // case the next cold start re-reads stale tokens and we run the bootstrap
+    // recovery path.
+    try {
+      await ref.read(secureTokenStoreProvider).clear();
+    } catch (_) {/* see comment above */}
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kAccountEmailKey);
+      await prefs.remove(_kAccountIdKey);
+      await prefs.remove(_kAccountVerifiedKey);
+      await prefs.remove(_kAccountHasTgKey);
+    } catch (_) {/* same */}
     state = const AuthUnauthenticated();
   }
 

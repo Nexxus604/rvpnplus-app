@@ -21,6 +21,7 @@ import 'package:hiddify/features/home/widget/connection_button.dart';
 import 'package:hiddify/features/home/widget/connection_button_fx.dart';
 import 'package:hiddify/features/proxy/active/active_proxy_delay_indicator.dart';
 import 'package:hiddify/features/settings/notifier/battery_optimization/battery_optimizations_notifier.dart';
+import 'package:hiddify/features/geo/widget/geo_chip.dart';
 import 'package:hiddify/features/servers/notifier/server_prefs.dart';
 import 'package:hiddify/features/servers/widget/ping_label.dart';
 import 'package:hiddify/features/servers/widget/server_profile_sync.dart';
@@ -134,6 +135,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
                   Gap(8),
                   _BatteryOptimizationBanner(),
+                  GeoChip(),
                   Expanded(child: _MyServersSection()),
                 ],
               ),
@@ -327,6 +329,10 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
   }
 
   Future<MyServersResult> _load() async {
+    // Audit M01: this future may resolve after the widget has been disposed
+    // (Future.microtask + the user navigating away). Every `ref.read` after
+    // an `await` is therefore gated on `mounted` — touching a disposed
+    // WidgetRef throws.
     final notifier = ref.read(authNotifierProvider.notifier);
     final auth = ref.read(authNotifierProvider);
     if (auth is! AuthAuthenticated) {
@@ -336,17 +342,19 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
     }
     try {
       final result = await _fetch(auth.accessToken);
-      ref.read(homeLockedProvider.notifier).state = false;
+      if (mounted) ref.read(homeLockedProvider.notifier).state = false;
       return result;
     } on SubscriptionApiException catch (e) {
       if (e.code != SubscriptionErrorCode.unauthorized) rethrow;
       // Access token rejected — try to refresh once before giving up so a
       // long-lived session survives an expired access token silently.
       final refreshed = await notifier.refreshAccess();
+      if (!mounted) rethrow;
       final after = ref.read(authNotifierProvider);
       if (refreshed && after is AuthAuthenticated) {
         ref.read(homeLockedProvider.notifier).state = false;
-        return await _fetch(after.accessToken);
+        final r = await _fetch(after.accessToken);
+        return r;
       }
       // Lock (and drop the tunnel) ONLY when the session is genuinely gone —
       // i.e. the notifier logged us out (refresh token invalid / account
@@ -354,7 +362,7 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
       // AuthAuthenticated; in that case do NOT lock or abort the VPN — it's
       // just an offline blip, and killing a working tunnel mid-use was a
       // stability bug ("выбивает через время").
-      if (after is! AuthAuthenticated) {
+      if (mounted && after is! AuthAuthenticated) {
         ref.read(homeLockedProvider.notifier).state = true;
       }
       rethrow;
@@ -587,7 +595,17 @@ class _ServerCard extends ConsumerWidget {
             content: Text('Переключаю на «${server.displayName}»…'),
             duration: const Duration(seconds: 8)));
         await conn.abortConnection();
-        await _waitDisconnected(ref);
+        // Audit H07: if the tunnel does NOT actually drop within the deadline
+        // we MUST NOT swap the active profile under it (the whole point of
+        // this guard) — abort the switch with a clear error to the user.
+        final reallyDown = await _waitDisconnected(ref);
+        if (!reallyDown) {
+          if (!context.mounted) return;
+          messenger.hideCurrentSnackBar();
+          messenger.showSnackBar(const SnackBar(
+              content: Text('Не удалось отключиться, попробуйте ещё раз')));
+          return;
+        }
       }
 
       bool ok;
@@ -641,13 +659,19 @@ class _ServerCard extends ConsumerWidget {
     }
   }
 
-  Future<void> _waitDisconnected(WidgetRef ref) async {
+  /// Audit H07: returns true if the tunnel reached Disconnected within the
+  /// 10s deadline. Callers MUST check the result — silently proceeding past
+  /// a missed deadline would reproduce the hot-swap-under-live-tunnel crash
+  /// this guard exists to prevent.
+  Future<bool> _waitDisconnected(WidgetRef ref) async {
     final deadline = DateTime.now().add(const Duration(seconds: 10));
     while (DateTime.now().isBefore(deadline)) {
       final st = ref.read(connectionNotifierProvider).valueOrNull;
-      if (st?.isDisconnected ?? false) return;
+      if (st?.isDisconnected ?? false) return true;
       await Future<void>.delayed(const Duration(milliseconds: 300));
     }
+    final last = ref.read(connectionNotifierProvider).valueOrNull;
+    return last?.isDisconnected ?? false;
   }
 
   Future<void> _applyProtocol(BuildContext context, WidgetRef ref, String proto) async {
