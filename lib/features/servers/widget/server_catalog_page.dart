@@ -15,6 +15,9 @@ import 'package:hiddify/core/api/subscription_api.dart';
 import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/common/cosmic_background.dart';
+import 'package:hiddify/features/connection/notifier/connection_notifier.dart';
+import 'package:hiddify/features/servers/notifier/server_prefs.dart';
+import 'package:hiddify/features/servers/widget/server_profile_sync.dart';
 import 'package:hiddify/features/speedtest/speed_test_page.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
@@ -101,14 +104,33 @@ class _ServerCatalogPageState extends ConsumerState<ServerCatalogPage> {
       ),
     );
     if (confirm != true || !mounted) return;
+    final api = ref.read(subscriptionApiProvider);
+    final conn = ref.read(connectionNotifierProvider.notifier);
+    final sync = ref.read(serverProfileSyncProvider);
+    final serverPrefs = ref.read(serverPrefsProvider);
+    final isSelected = serverPrefs.selected == s.code;
+    final isAwg = serverPrefs.isAwg(s.code);
     final messenger = ScaffoldMessenger.of(context);
+    // H08: if the tunnel is up (or forming) on the very server we're about to
+    // deprovision, drop it FIRST — otherwise the tunnel keeps pointing at a
+    // server that no longer exists (silent blackhole, UI stuck "Подключено").
+    final st = conn.currentStatus;
+    if (isSelected && ((st?.isConnected ?? false) || (st?.isSwitching ?? false))) {
+      await conn.abortConnection();
+      await _waitDisconnected(conn);
+      if (!mounted) return;
+    }
     setState(() => _pending.add(s.code));
     messenger.showSnackBar(SnackBar(content: Text('Деактивирую ${s.city ?? s.code}…')));
     try {
-      await ref.read(subscriptionApiProvider).deleteServer(
-            accessToken: auth.accessToken,
-            slotId: s.slotId!,
-          );
+      await api.deleteServer(accessToken: auth.accessToken, slotId: s.slotId!);
+      // Remove the now-orphaned profile so it can't auto-reconnect. An AWG
+      // server's profile is LOCAL — removeProfileByUrl only matches remote
+      // ones — so drop locals explicitly. Remote (VLESS) orphans are reaped by
+      // the Home reconcile on its next load.
+      if (isSelected && isAwg) {
+        await sync.removeLocalProfiles();
+      }
       if (!mounted) return;
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(SnackBar(content: Text('«${s.city ?? s.code}» деактивирован')));
@@ -119,6 +141,14 @@ class _ServerCatalogPageState extends ConsumerState<ServerCatalogPage> {
       messenger.showSnackBar(SnackBar(content: Text(_err(e))));
     } finally {
       if (mounted) setState(() => _pending.remove(s.code));
+    }
+  }
+
+  Future<void> _waitDisconnected(ConnectionNotifier conn) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    while (DateTime.now().isBefore(deadline)) {
+      if (conn.currentStatus?.isDisconnected ?? false) return;
+      await Future<void>.delayed(const Duration(milliseconds: 300));
     }
   }
 

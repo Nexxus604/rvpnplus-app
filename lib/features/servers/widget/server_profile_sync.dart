@@ -116,6 +116,37 @@ class ServerProfileSync {
     } catch (_) {}
   }
 
+  /// Read the raw config of a profile by id. Used to snapshot the user's
+  /// currently-active LOCAL (AmneziaWG) profile before a speed test, which
+  /// would otherwise delete it (selectLocal drops all locals), so it can be
+  /// restored afterwards.
+  Future<String?> rawConfig(String id) async {
+    final repo = _repo;
+    if (repo == null) return null;
+    try {
+      final res = await repo.getRawConfig(id).run();
+      return res.fold((_) => null, (c) => c);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Delete every local (AmneziaWG) profile. Used when deactivating/deleting an
+  /// AWG server: removeProfileByUrl only matches REMOTE profiles, so without
+  /// this the active local tunnel would survive a deprovision (silent
+  /// blackhole). Best-effort; never throws.
+  Future<void> removeLocalProfiles() async {
+    final repo = _repo;
+    if (repo == null) return;
+    try {
+      for (final p in await _allProfiles()) {
+        if (p is LocalProfileEntity) {
+          await repo.deleteById(p.id, p.active).run();
+        }
+      }
+    } catch (_) {}
+  }
+
   /// Delete the Hiddify profile whose URL matches [configUrl], if present.
   Future<void> removeProfileByUrl(String? configUrl) async {
     if (configUrl == null) return;

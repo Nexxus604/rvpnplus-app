@@ -22,6 +22,7 @@ import 'package:hiddify/core/api/geo_api.dart';
 import 'package:hiddify/core/api/subscription_api.dart';
 import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/connection/notifier/connection_notifier.dart';
+import 'package:hiddify/features/profile/model/profile_entity.dart';
 import 'package:hiddify/features/profile/notifier/active_profile_notifier.dart';
 import 'package:hiddify/features/servers/widget/server_profile_sync.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -104,7 +105,33 @@ class SpeedTestRunner {
     ));
   }
 
+  // Process-wide single-flight: a new run cancels and awaits any previous one
+  // (e.g. user closed the page and reopened it) so two runners don't fight over
+  // the shared profile store / tunnel.
+  static SpeedTestRunner? _active;
+  static Future<void>? _inFlight;
+
   Future<void> run(void Function(SpeedProgress) onProgress) async {
+    final prev = _inFlight;
+    if (prev != null) {
+      _active?.cancel();
+      try {
+        await prev;
+      } catch (_) {}
+    }
+    final completer = Completer<void>();
+    _inFlight = completer.future;
+    _active = this;
+    try {
+      await _runBody(onProgress);
+    } finally {
+      if (_active == this) _active = null;
+      if (identical(_inFlight, completer.future)) _inFlight = null;
+      completer.complete();
+    }
+  }
+
+  Future<void> _runBody(void Function(SpeedProgress) onProgress) async {
     _emit = onProgress;
     _progress = 0.04;
     _report(SpeedPhase.preparing);
@@ -147,7 +174,16 @@ class SpeedTestRunner {
     }
     if (_cancelled) return;
 
-    final prevActiveId = _ref.read(activeProfileProvider).valueOrNull?.id;
+    // Snapshot the user's currently-active profile to restore THEIR connection
+    // afterwards. For a LOCAL (AWG) profile we must also capture its raw config
+    // now, because the AWG test step deletes all locals (H10).
+    final prevActive = _ref.read(activeProfileProvider).valueOrNull;
+    final prevWasLocal = prevActive is LocalProfileEntity;
+    String? prevLocalContent;
+    if (prevActive is LocalProfileEntity) {
+      // type-promoted here → .id is safe and non-null
+      prevLocalContent = await sync.rawConfig(prevActive.id);
+    }
 
     final steps = <_Step>[
       if (vlessUrl != null) _Step('VLESS', SpeedPhase.vless, () => sync.selectRemote(vlessUrl!)),
@@ -155,29 +191,65 @@ class SpeedTestRunner {
     ];
     final n = steps.length;
 
-    for (var i = 0; i < n; i++) {
-      if (_cancelled) return;
-      final step = steps[i];
-      _progress = 0.08 + (i / n) * 0.86;
-      _report(step.phase);
-      final imported = await step.select();
-      final res = imported
-          ? await _measure(step.protocol, step.phase, i, n)
-          : ProtocolResult(
-              protocol: step.protocol, connected: false, error: 'Профиль не импортирован');
-      _results.add(res);
-      _progress = 0.08 + ((i + 1) / n) * 0.86;
-      _report(step.phase);
-      await _ensureDisconnected();
+    try {
+      for (var i = 0; i < n; i++) {
+        if (_cancelled) return;
+        final step = steps[i];
+        _progress = 0.08 + (i / n) * 0.86;
+        _report(step.phase);
+        final imported = await step.select();
+        final res = imported
+            ? await _measure(step.protocol, step.phase, i, n)
+            : ProtocolResult(
+                protocol: step.protocol, connected: false, error: 'Профиль не импортирован');
+        _results.add(res);
+        _progress = 0.08 + ((i + 1) / n) * 0.86;
+        _report(step.phase);
+        await _ensureDisconnected();
+      }
+      if (!_cancelled) {
+        _progress = 0.97;
+        _report(SpeedPhase.finishing);
+      }
+    } finally {
+      // ALWAYS drop the test tunnel and restore the user's previous profile —
+      // even on cancel (page closed mid-test) or an unexpected throw (H09).
+      await _teardownAndRestore(sync, prevActive, prevWasLocal, prevLocalContent);
     }
 
     if (_cancelled) return;
-    _progress = 0.97;
-    _report(SpeedPhase.finishing);
-    if (prevActiveId != null) await sync.setActive(prevActiveId);
-
     _progress = 1.0;
     _report(SpeedPhase.done, recommendation: _recommend());
+  }
+
+  /// Tear the test tunnel down and restore the user's pre-test active profile.
+  /// Safe after cancel: uses only the captured keepAlive notifier + the
+  /// provider-scoped sync (never the page WidgetRef once cancelled).
+  Future<void> _teardownAndRestore(
+    ServerProfileSync sync,
+    ProfileEntity? prev,
+    bool prevWasLocal,
+    String? prevLocalContent,
+  ) async {
+    await _conn?.abortConnection();
+    // Poll for the drop only while the page is alive; after cancel the
+    // WidgetRef is disposed and must not be read.
+    if (!_cancelled) {
+      final deadline = DateTime.now().add(const Duration(seconds: 12));
+      while (DateTime.now().isBefore(deadline)) {
+        final st = _ref.read(connectionNotifierProvider).valueOrNull;
+        if (st?.isDisconnected ?? false) break;
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+      }
+    }
+    if (prev == null) return;
+    if (prevWasLocal) {
+      // The AWG step deleted all locals; re-import the snapshot to restore it.
+      if (prevLocalContent != null) await sync.selectLocal(prevLocalContent);
+    } else {
+      // Remote profile still exists — just re-activate it.
+      await sync.setActive(prev.id);
+    }
   }
 
   Future<ProtocolResult> _measure(String protocol, SpeedPhase phase, int i, int n) async {
@@ -211,11 +283,17 @@ class SpeedTestRunner {
     int? best;
     try {
       for (var i = 0; i < 3; i++) {
+        if (_cancelled) break;
         final sw = Stopwatch()..start();
         try {
-          final req = await client.getUrl(Uri.parse('${_downloadUrl}1'));
-          final resp = await req.close();
-          await resp.drain<void>();
+          // A hung connect/drain (tunnel stalled) would otherwise freeze the
+          // whole test — bound each probe.
+          await () async {
+            final req = await client.getUrl(Uri.parse('${_downloadUrl}1'));
+            final resp = await req.close();
+            await resp.drain<void>();
+          }()
+              .timeout(const Duration(seconds: 6));
           sw.stop();
           final ms = sw.elapsedMilliseconds;
           if (best == null || ms < best) best = ms;
@@ -229,9 +307,10 @@ class SpeedTestRunner {
 
   Future<double?> _download(void Function(double mbps, double frac) onLive) async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    Timer? watchdog;
     try {
       final req = await client.getUrl(Uri.parse('$_downloadUrl$_downloadBytes'));
-      final resp = await req.close();
+      final resp = await req.close().timeout(const Duration(seconds: 10));
       var received = 0;
       final sw = Stopwatch()..start();
       var lastEmit = 0;
@@ -240,12 +319,20 @@ class SpeedTestRunner {
 
       void finish() {
         if (completer.isCompleted) return;
+        watchdog?.cancel();
         sw.stop();
         final secs = sw.elapsedMilliseconds / 1000.0;
-        final mbps = secs > 0 ? (received * 8) / secs / 1e6 : null;
+        final mbps = secs > 0 && received > 0 ? (received * 8) / secs / 1e6 : null;
         sub.cancel();
         completer.complete(mbps);
       }
+
+      // A silently stalled stream (tunnel dropped mid-download) delivers no
+      // further chunks, so finish() — driven only by chunk/onDone/onError —
+      // would never fire and the whole test would hang (_busy stuck → frozen
+      // UI). Hard-stop after the max window plus a small grace.
+      watchdog = Timer(
+          const Duration(seconds: _downloadMaxSeconds + 3), finish);
 
       sub = resp.listen(
         (chunk) {
@@ -267,14 +354,28 @@ class SpeedTestRunner {
     } catch (_) {
       return null;
     } finally {
+      watchdog?.cancel();
       client.close(force: true);
     }
   }
 
-  Future<bool> _waitConnected() => _waitFor(() {
-        final st = _ref.read(connectionNotifierProvider).valueOrNull;
-        return st?.isConnected ?? false;
-      }, _connectTimeout);
+  Future<bool> _waitConnected() async {
+    final deadline = DateTime.now().add(_connectTimeout);
+    var sawConnecting = false;
+    while (DateTime.now().isBefore(deadline)) {
+      if (_cancelled) return false; // page gone — don't touch ref
+      final av = _ref.read(connectionNotifierProvider);
+      final st = av.valueOrNull;
+      if (st?.isConnected ?? false) return true;
+      // Connect errored — bail now instead of burning the full 25s.
+      if (av.hasError) return false;
+      if (st?.isSwitching ?? false) sawConnecting = true;
+      // Saw Connecting then fell back to Disconnected ⇒ connect failed.
+      if (sawConnecting && (st?.isDisconnected ?? false)) return false;
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
+    return false;
+  }
 
   Future<void> _ensureDisconnected() async {
     if (_cancelled) return;
