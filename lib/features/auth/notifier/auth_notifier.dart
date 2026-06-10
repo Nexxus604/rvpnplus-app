@@ -97,6 +97,13 @@ class AuthNotifier extends Notifier<AuthState> {
   /// Guard against the user double-tapping "Get code" / "Resend".
   bool _otpRequestInFlight = false;
 
+  /// Bumped on any intentional session teardown (logout / back-to-email).
+  /// Async methods capture it before their awaits and refuse to write
+  /// AuthAuthenticated back if it changed — without this, a logout that lands
+  /// mid refresh/probe is silently undone (the user gets logged back in, with
+  /// stale tokens re-persisted to disk).
+  int _sessionEpoch = 0;
+
   @override
   AuthState build() {
     _bootstrap();
@@ -168,9 +175,15 @@ class AuthNotifier extends Notifier<AuthState> {
   /// Calls /v1/account; on 401 tries refresh once. Errors that aren't
   /// 401 are logged but don't change state (we keep the cached values
   /// and let the user see an offline-ish UI).
-  Future<void> _probeAccount() async {
+  /// Public hook to re-pull /v1/account (subscription + email/TG flags). Used
+  /// on app resume so a payment just made in Tribute is reflected without the
+  /// user having to manually reload.
+  Future<void> refreshAccount() => _probeAccount();
+
+  Future<void> _probeAccount({bool retried = false}) async {
     final current = state;
     if (current is! AuthAuthenticated) return;
+    final epoch = _sessionEpoch;
     try {
       final details =
           await ref.read(accountApiProvider).get(accessToken: current.accessToken);
@@ -178,7 +191,9 @@ class AuthNotifier extends Notifier<AuthState> {
       // logged out / refresh rotated the token, our snapshot is stale
       // and we MUST NOT write `AuthAuthenticated` back. Reviewer F2.
       final after = state;
-      if (after is! AuthAuthenticated || after.accessToken != current.accessToken) {
+      if (_sessionEpoch != epoch ||
+          after is! AuthAuthenticated ||
+          after.accessToken != current.accessToken) {
         return;
       }
       // Persist updated fields so the next cold start doesn't lie about
@@ -186,15 +201,25 @@ class AuthNotifier extends Notifier<AuthState> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_kAccountVerifiedKey, details.account.emailVerified);
       await prefs.setBool(_kAccountHasTgKey, details.account.hasTelegram);
-      state = after.copyWith(
+      // Re-check again AFTER the prefs awaits — a logout can land here too.
+      final after2 = state;
+      if (_sessionEpoch != epoch ||
+          after2 is! AuthAuthenticated ||
+          after2.accessToken != current.accessToken) {
+        return;
+      }
+      state = after2.copyWith(
         account: details.account,
         subscription: details.subscription,
       );
     } on AccountApiException catch (e) {
-      if (e.code == AccountErrorCode.unauthorized) {
+      // Recurse at most once: reaching here after a refresh means the access
+      // token is still rejected (signing-key mismatch / clock skew). Looping
+      // would rotate the refresh token forever and storm the network/battery.
+      if (e.code == AccountErrorCode.unauthorized && !retried) {
         final refreshed = await refreshAccess();
-        if (refreshed && state is AuthAuthenticated) {
-          await _probeAccount();
+        if (refreshed && _sessionEpoch == epoch && state is AuthAuthenticated) {
+          await _probeAccount(retried: true);
         }
       }
       // network / unknown — keep cached state; user sees offline-ish UI.
@@ -328,29 +353,48 @@ class AuthNotifier extends Notifier<AuthState> {
         settle(false);
         return false;
       }
+      final epoch = _sessionEpoch;
       try {
         final result = await ref
             .read(authApiProvider)
             .refresh(refreshToken: current.refreshToken);
-        // Reviewer F2: bail if state moved during our await.
+        // Reviewer F2 + epoch: bail if state moved or a logout landed.
         final after = state;
-        if (after is! AuthAuthenticated ||
+        if (_sessionEpoch != epoch ||
+            after is! AuthAuthenticated ||
             after.refreshToken != current.refreshToken) {
           settle(false);
           return false;
         }
-        await _persist(
-          accessToken: result.accessToken,
-          refreshToken: result.refreshToken,
-          accountId: after.account.id,
-          accountEmail: after.account.email,
-          emailVerified: after.account.emailVerified,
-          hasTelegram: after.account.hasTelegram,
-        );
+        // Set the in-memory tokens FIRST — memory is the operative copy. If
+        // _persist then throws (Keystore/PlatformException, the MIUI failure
+        // mode), we still hold the freshly rotated tokens instead of keeping
+        // the now-invalid old refresh token (which would force a logout on the
+        // next refresh). No await between the guard above and this write, so a
+        // logout can't interleave here.
         state = after.copyWith(
           accessToken: result.accessToken,
           refreshToken: result.refreshToken,
         );
+        try {
+          await _persist(
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
+            accountId: after.account.id,
+            accountEmail: after.account.email,
+            emailVerified: after.account.emailVerified,
+            hasTelegram: after.account.hasTelegram,
+          );
+        } catch (_) {/* disk write best-effort; memory holds the new tokens */}
+        if (_sessionEpoch != epoch) {
+          // A logout slipped in while we were persisting — don't leave fresh
+          // tokens on disk for the next cold start to resurrect.
+          try {
+            await ref.read(secureTokenStoreProvider).clear();
+          } catch (_) {}
+          settle(false);
+          return false;
+        }
         settle(true);
         return true;
       } on AuthApiException catch (e) {
@@ -381,6 +425,9 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   Future<void> logout() async {
+    // Mark the session torn down up front so any in-flight refresh/probe that
+    // resolves after this won't resurrect AuthAuthenticated (epoch guard).
+    _sessionEpoch++;
     // Audit H11: logout used to leave the user trapped on the session-lock
     // overlay if either of these storage operations threw (Keystore briefly
     // down on MIUI, prefs corrupted). Always flip the state at the end so
@@ -401,6 +448,7 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   void backToEmail() {
+    _sessionEpoch++;
     state = const AuthUnauthenticated();
   }
 

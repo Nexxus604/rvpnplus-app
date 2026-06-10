@@ -104,8 +104,10 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     } on ChatApiException catch (e) {
       if (!mounted) return;
       setState(() {
-        // Drop the optimistic bubble — the message didn't go through.
+        // Drop the optimistic bubble — the message didn't go through — and
+        // restore the user's text so a failed send doesn't lose what they typed.
         _messages.removeWhere((m) => m.id < 0);
+        if (_input.text.trim().isEmpty) _input.text = text;
         _sending = false;
         _error = switch (e.code) {
           ChatErrorCode.unauthorized => 'Сессия истекла. Войдите заново.',
@@ -114,6 +116,17 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           ChatErrorCode.upstream => 'AI перегружен, попробуйте ещё раз.',
           ChatErrorCode.unknown => 'Не удалось отправить: ${e.message}',
         };
+      });
+    } catch (_) {
+      // Any other error (e.g. a TypeError from an unexpected response shape)
+      // must still reset _sending — otherwise the send button stays disabled
+      // and the typing bubble spins forever, needing an app restart.
+      if (!mounted) return;
+      setState(() {
+        _messages.removeWhere((m) => m.id < 0);
+        if (_input.text.trim().isEmpty) _input.text = text;
+        _sending = false;
+        _error = 'Не удалось отправить сообщение.';
       });
     }
   }

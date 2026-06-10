@@ -26,7 +26,9 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
     _future = _load();
   }
 
-  Future<List<DeviceItem>> _load() {
+  // async so a not-authenticated throw becomes a failed Future the FutureBuilder
+  // renders as an error, instead of a synchronous throw escaping to a red screen.
+  Future<List<DeviceItem>> _load() async {
     final auth = ref.read(authNotifierProvider);
     if (auth is! AuthAuthenticated) {
       throw const DevicesApiException(
@@ -112,14 +114,16 @@ class _DevicesPageState extends ConsumerState<DevicesPage> {
         ],
       ),
     );
-    if (confirm != true) return;
+    // mounted check after the dialog await: the State can be disposed while the
+    // confirm dialog is open (logout redirect / session expiry) → using ref
+    // then throws.
+    if (confirm != true || !mounted) return;
 
     final auth = ref.read(authNotifierProvider);
     if (auth is! AuthAuthenticated) return;
+    final api = ref.read(devicesApiProvider);
     try {
-      await ref
-          .read(devicesApiProvider)
-          .revoke(accessToken: auth.accessToken, deviceId: d.id);
+      await api.revoke(accessToken: auth.accessToken, deviceId: d.id);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('«${d.name ?? d.platform}» отключено')),

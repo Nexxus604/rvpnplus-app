@@ -30,6 +30,7 @@ class _TelegramLinkPageState extends ConsumerState<TelegramLinkPage> {
   Timer? _poll;
   DateTime? _deadline;
   bool _checking = false;
+  bool _starting = false;
 
   @override
   void initState() {
@@ -44,6 +45,12 @@ class _TelegramLinkPageState extends ConsumerState<TelegramLinkPage> {
   }
 
   Future<void> _start() async {
+    // Re-entrancy guard + cancel any previous poll: "Повторить" (or a retry
+    // racing a slow start) would otherwise leave a second Timer.periodic
+    // running forever, firing _check() on a possibly-disposed element.
+    if (_starting) return;
+    _starting = true;
+    _poll?.cancel();
     setState(() => _phase = _Phase.starting);
     try {
       final res = await ref.read(tgLinkApiProvider).start();
@@ -56,6 +63,8 @@ class _TelegramLinkPageState extends ConsumerState<TelegramLinkPage> {
       _poll = Timer.periodic(const Duration(seconds: 2), (_) => _check());
     } catch (_) {
       if (mounted) setState(() => _phase = _Phase.error);
+    } finally {
+      _starting = false;
     }
   }
 

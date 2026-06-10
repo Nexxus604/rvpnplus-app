@@ -17,6 +17,7 @@ import 'package:hiddify/core/router/go_router/helper/active_breakpoint_notifier.
 import 'package:hiddify/core/theme/app_theme.dart';
 import 'package:hiddify/core/theme/theme_preferences.dart';
 import 'package:hiddify/features/app_update/notifier/app_update_notifier.dart';
+import 'package:hiddify/features/auth/notifier/auth_notifier.dart';
 import 'package:hiddify/features/connection/widget/connection_wrapper.dart';
 import 'package:hiddify/features/per_app_proxy/overview/per_app_proxy_service_notifier.dart';
 import 'package:hiddify/features/profile/notifier/profiles_update_notifier.dart';
@@ -48,6 +49,13 @@ class App extends HookConsumerWidget with WidgetsBindingObserver, PresLogger {
   void onResume(WidgetRef ref) {
     // if (PlatformUtils.isDesktop) return;
     ref.read(hiddifyCoreServiceProvider).init();
+
+    // Re-pull /v1/account on every resume (fire-and-forget): the user may have
+    // just paid in Tribute/Telegram — without this the subscription stays stale
+    // until an app restart (audit H18).
+    unawaited(
+      ref.read(authNotifierProvider.notifier).refreshAccount().catchError((Object _) {}),
+    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (isOnPauseCalled && PlatformUtils.isAndroid) ref.invalidate(perAppProxyServiceProvider);

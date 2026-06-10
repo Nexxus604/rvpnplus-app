@@ -81,27 +81,35 @@ class _JwtAuthInterceptor extends Interceptor {
       handler.next(response);
       return;
     }
-    final notifier = _ref.read(authNotifierProvider.notifier);
-    final ok = await notifier.refreshAccess();
-    if (!ok) {
-      handler.next(response);
-      return;
-    }
-    final auth = _ref.read(authNotifierProvider);
-    if (auth is! AuthAuthenticated) {
-      handler.next(response);
-      return;
-    }
-    // Replay the original request with the new access token + retry marker.
-    final newHeaders = Map<String, dynamic>.from(ro.headers);
-    newHeaders['Authorization'] = 'Bearer ${auth.accessToken}';
-    newHeaders[_retryHeader] = '1';
-    final retryOptions = ro.copyWith(headers: newHeaders);
+    // The ENTIRE 401 branch must be guarded: an exception thrown in the async
+    // body of a Dio interceptor reaches neither `next` nor `reject`, so the
+    // original request's Future would never complete and every awaiting caller
+    // hangs forever. refreshAccess() can throw a PlatformException (Keystore /
+    // secure-storage failure — the documented MIUI mode) or a StateError on a
+    // disposed container; `_ref.read` likewise. On ANY failure, fall through to
+    // surfacing the original 401 so the caller at least gets a response.
     try {
+      final notifier = _ref.read(authNotifierProvider.notifier);
+      final ok = await notifier.refreshAccess();
+      if (!ok) {
+        handler.next(response);
+        return;
+      }
+      final auth = _ref.read(authNotifierProvider);
+      if (auth is! AuthAuthenticated) {
+        handler.next(response);
+        return;
+      }
+      // Replay the original request with the new access token + retry marker.
+      final newHeaders = Map<String, dynamic>.from(ro.headers);
+      newHeaders['Authorization'] = 'Bearer ${auth.accessToken}';
+      newHeaders[_retryHeader] = '1';
+      final retryOptions = ro.copyWith(headers: newHeaders);
       final retry = await _dio.fetch<dynamic>(retryOptions);
       handler.resolve(retry);
     } catch (_) {
-      // Retry transport failed — surface the original 401 response.
+      // Refresh or retry transport failed — surface the original 401 response
+      // rather than leaving the request hanging.
       handler.next(response);
     }
   }

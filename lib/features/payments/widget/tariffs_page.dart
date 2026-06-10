@@ -21,6 +21,7 @@ class TariffsPage extends ConsumerStatefulWidget {
 
 class _TariffsPageState extends ConsumerState<TariffsPage> {
   late Future<List<Tariff>> _future;
+  bool _paying = false;
 
   @override
   void initState() {
@@ -28,7 +29,9 @@ class _TariffsPageState extends ConsumerState<TariffsPage> {
     _future = _load();
   }
 
-  Future<List<Tariff>> _load() {
+  // async so a not-authenticated throw becomes a failed Future the FutureBuilder
+  // can render as an error — a synchronous throw would escape into a red screen.
+  Future<List<Tariff>> _load() async {
     final auth = ref.read(authNotifierProvider);
     if (auth is! AuthAuthenticated) {
       throw const TariffsApiException(
@@ -40,6 +43,7 @@ class _TariffsPageState extends ConsumerState<TariffsPage> {
   void _reload() => setState(() => _future = _load());
 
   Future<void> _pay(Tariff tariff) async {
+    if (_paying) return; // guard double-tap → two Tribute opens
     final messenger = ScaffoldMessenger.of(context);
     if (!tariff.payable) {
       messenger.showSnackBar(const SnackBar(
@@ -47,12 +51,25 @@ class _TariffsPageState extends ConsumerState<TariffsPage> {
       ));
       return;
     }
-    final uri = Uri.parse(tariff.tributeLink!);
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok && context.mounted) {
-      messenger.showSnackBar(const SnackBar(
-        content: Text('Не удалось открыть оплату. Попробуйте ещё раз.'),
-      ));
+    _paying = true;
+    try {
+      // Uri.parse can throw FormatException on a malformed link; launchUrl can
+      // throw PlatformException when there's no handler (no Telegram/browser).
+      final uri = Uri.parse(tariff.tributeLink!);
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok && context.mounted) {
+        messenger.showSnackBar(const SnackBar(
+          content: Text('Не удалось открыть оплату. Попробуйте ещё раз.'),
+        ));
+      }
+    } catch (_) {
+      if (context.mounted) {
+        messenger.showSnackBar(const SnackBar(
+          content: Text('Не удалось открыть оплату. Попробуйте ещё раз.'),
+        ));
+      }
+    } finally {
+      _paying = false;
     }
   }
 

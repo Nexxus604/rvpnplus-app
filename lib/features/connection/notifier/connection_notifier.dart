@@ -65,6 +65,12 @@ class ConnectionNotifier extends _$ConnectionNotifier with AppLogger {
 
   ConnectionRepository get _connectionRepo => ref.read(connectionRepositoryProvider);
 
+  /// Current connection status snapshot (null until the stream first emits).
+  /// Exposed so a caller that captured this notifier *before* an await can poll
+  /// the live status without touching a possibly-disposed WidgetRef (the source
+  /// of the server-switch ref-after-dispose crashes).
+  ConnectionStatus? get currentStatus => state.valueOrNull;
+
   Future<void> mayConnect() async {
     if (state case AsyncData(:final value)) {
       if (value case Disconnected()) return _connect();

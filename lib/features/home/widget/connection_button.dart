@@ -13,6 +13,7 @@ import 'package:hiddify/features/connection/model/connection_status.dart';
 import 'package:hiddify/features/connection/notifier/connection_notifier.dart';
 import 'package:hiddify/features/profile/notifier/active_profile_notifier.dart';
 import 'package:hiddify/features/proxy/active/active_proxy_notifier.dart';
+import 'package:hiddify/features/servers/notifier/server_switching.dart';
 import 'package:hiddify/features/settings/data/config_option_repository.dart';
 import 'package:hiddify/features/settings/notifier/config_option/config_option_notifier.dart';
 import 'package:hiddify/gen/assets.gen.dart';
@@ -27,6 +28,11 @@ class ConnectionButton extends HookConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final t = ref.watch(translationsProvider).requireValue;
     final connectionStatus = ref.watch(connectionNotifierProvider);
+    // While a server switch is mid-flight (disconnect → swap → reconnect) the
+    // status briefly reads Disconnected; without this guard the main button is
+    // enabled in that window and a tap races the profile swap (connects to the
+    // old server, or for AWG to a just-deleted profile). Disable it instead.
+    final switching = ref.watch(serverSwitchingProvider);
     final activeProxy = ref.watch(activeProxyNotifierProvider);
     final delay = activeProxy.valueOrNull?.urlTestDelay ?? 0;
 
@@ -112,11 +118,13 @@ class ConnectionButton extends HookConsumerWidget {
         (ref.watch(ConfigOptions.enableWarp) && ref.watch(ConfigOptions.warpDetourMode) == WarpDetourMode.warpOverProxy)
         ? t.connection.secure
         : "";
-    if (delay <= 0 || delay > 65000 || connectionStatus.value != const Connected()) {
+    if (delay <= 0 || delay > 65000 || connectionStatus.valueOrNull != const Connected()) {
       secureLabel = "";
     }
     return _ConnectionButton(
-      onTap: switch (connectionStatus) {
+      onTap: switching
+          ? () {}
+          : switch (connectionStatus) {
         AsyncData(value: Connected()) when requiresReconnect == true => () async {
           final activeProfile = await ref.read(activeProfileProvider.future);
           return await ref.read(connectionNotifierProvider.notifier).reconnect(activeProfile);
@@ -141,7 +149,9 @@ class ConnectionButton extends HookConsumerWidget {
         },
         _ => () {},
       },
-      enabled: switch (connectionStatus) {
+      enabled: switching
+          ? false
+          : switch (connectionStatus) {
         AsyncData(value: Connected()) || AsyncData(value: Disconnected()) || AsyncError() => true,
         _ => false,
       },

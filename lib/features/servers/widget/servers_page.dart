@@ -35,16 +35,18 @@ class _ServersPageState extends ConsumerState<ServersPage> {
       throw const SubscriptionApiException(
           SubscriptionErrorCode.unauthorized, 'Not logged in');
     }
-    final result = await ref
-        .read(subscriptionApiProvider)
-        .myServers(accessToken: auth.accessToken);
+    // Capture before await — this State may be disposed by the time the
+    // request resolves; the captured objects outlive it (M01 class).
+    final api = ref.read(subscriptionApiProvider);
+    final sync = ref.read(serverProfileSyncProvider);
+    final result = await api.myServers(accessToken: auth.accessToken);
     // Read-sync: drop Hiddify profiles for servers no longer in the
     // subscription (e.g. removed in the bot).
     final currentUrls = result.servers
         .map((s) => s.configUrl)
         .whereType<String>()
         .toSet();
-    await ref.read(serverProfileSyncProvider).reconcile(currentUrls);
+    await sync.reconcile(currentUrls);
     return result;
   }
 
@@ -208,16 +210,16 @@ class _ServerTile extends ConsumerWidget {
 
     final auth = ref.read(authNotifierProvider);
     if (auth is! AuthAuthenticated) return;
+    final subApi = ref.read(subscriptionApiProvider);
+    final sync = ref.read(serverProfileSyncProvider);
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(SnackBar(
       content: Text('Удаляем ${server.city ?? server.code}…'),
     ));
     try {
-      await ref
-          .read(subscriptionApiProvider)
-          .deleteServer(accessToken: auth.accessToken, slotId: server.slotId);
+      await subApi.deleteServer(accessToken: auth.accessToken, slotId: server.slotId);
       // Drop the matching Hiddify profile too, so it's gone from connect.
-      await ref.read(serverProfileSyncProvider).removeProfileByUrl(server.configUrl);
+      await sync.removeProfileByUrl(server.configUrl);
       if (!context.mounted) return;
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(SnackBar(

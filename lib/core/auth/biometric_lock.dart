@@ -9,6 +9,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:hiddify/core/preferences/preferences_provider.dart';
 import 'package:hiddify/core/theme/cosmic_palette.dart';
 import 'package:hiddify/features/common/cosmic_background.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -52,14 +53,13 @@ class BiometricLock extends Notifier<BiometricState> {
 
   @override
   BiometricState build() {
-    _load();
-    return const BiometricState(enabled: false, unlocked: true);
-  }
-
-  Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
+    // Read the persisted flag SYNCHRONOUSLY — bootstrap awaits
+    // sharedPreferencesProvider before runApp, so requireValue is ready here.
+    // This removes the 1-frame `unlocked:true` flash that previously leaked app
+    // content into the task-switcher snapshot on a locked cold start (M03).
+    final prefs = ref.read(sharedPreferencesProvider).requireValue;
     final enabled = prefs.getBool(_kBiometricEnabledKey) ?? false;
-    state = BiometricState(enabled: enabled, unlocked: !enabled);
+    return BiometricState(enabled: enabled, unlocked: !enabled);
   }
 
   // The actual system prompt. Allows the device PIN/pattern/password fallback
@@ -178,6 +178,13 @@ class _BiometricGateState extends ConsumerState<BiometricGate>
     super.dispose();
   }
 
+  // Auto-prompt at most ONCE per lock engagement. Without this, cancelling the
+  // device-credential sheet drives the app through resume → re-prompt → cancel
+  // → resume … an inescapable loop in which the "Отключить блокировку" escape
+  // button is never reachable (M02, the MIUI biometric bug). The manual button
+  // calls _manualUnlock, which always prompts.
+  bool _autoPrompted = false;
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState s) {
     final n = ref.read(biometricLockProvider.notifier);
@@ -185,12 +192,24 @@ class _BiometricGateState extends ConsumerState<BiometricGate>
     // while the system auth sheet is up (that would loop the prompt).
     if (s == AppLifecycleState.paused || s == AppLifecycleState.hidden) {
       n.lock();
+      _autoPrompted = false; // a fresh lock re-arms one auto-prompt
     } else if (s == AppLifecycleState.resumed) {
-      _maybeUnlock();
+      _autoPromptIfNeeded();
     }
   }
 
-  void _maybeUnlock() {
+  /// Auto-prompt that fires at most once per lock (resume / engage).
+  void _autoPromptIfNeeded() {
+    if (_autoPrompted) return;
+    final st = ref.read(biometricLockProvider);
+    if (st.enabled && !st.unlocked) {
+      _autoPrompted = true;
+      ref.read(biometricLockProvider.notifier).unlock();
+    }
+  }
+
+  /// Explicit user tap on "Разблокировать" — always prompts.
+  void _manualUnlock() {
     final st = ref.read(biometricLockProvider);
     if (st.enabled && !st.unlocked) {
       ref.read(biometricLockProvider.notifier).unlock();
@@ -202,7 +221,10 @@ class _BiometricGateState extends ConsumerState<BiometricGate>
     // Auto-prompt the moment the lock engages (cold-start load, or re-lock).
     ref.listen<BiometricState>(biometricLockProvider, (prev, next) {
       final justLocked = next.enabled && !next.unlocked && (prev == null || prev.unlocked || !prev.enabled);
-      if (justLocked) WidgetsBinding.instance.addPostFrameCallback((_) => _maybeUnlock());
+      if (justLocked) {
+        _autoPrompted = false;
+        WidgetsBinding.instance.addPostFrameCallback((_) => _autoPromptIfNeeded());
+      }
     });
 
     final st = ref.watch(biometricLockProvider);
@@ -210,7 +232,7 @@ class _BiometricGateState extends ConsumerState<BiometricGate>
     return Stack(
       children: [
         widget.child,
-        if (locked) _LockScreen(error: st.error, onUnlock: _maybeUnlock),
+        if (locked) _LockScreen(error: st.error, onUnlock: _manualUnlock),
       ],
     );
   }

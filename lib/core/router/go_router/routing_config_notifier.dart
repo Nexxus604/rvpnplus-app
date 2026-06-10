@@ -111,8 +111,10 @@ class RoutingConfigNotifier extends _$RoutingConfigNotifier {
         if (authState is AuthPendingOtp) {
           return location == '/auth/otp' ? null : '/auth/otp';
         }
-        // authState is AuthAuthenticated — bounce intro/auth back home.
-        if (isIntro || isAuth) {
+        // authState is AuthAuthenticated — bounce intro/auth back home, EXCEPT
+        // /auth/telegram, which an authenticated user opens from Account to bind
+        // their Telegram (otherwise the button is instantly redirected = dead).
+        if ((isIntro || isAuth) && location != '/auth/telegram') {
           if (url != null) {
             WidgetsBinding.instance.addPostFrameCallback(
               (_) => ref.read(bottomSheetsNotifierProvider.notifier).showAddProfile(url: url),

@@ -23,6 +23,7 @@ import 'package:hiddify/features/proxy/active/active_proxy_delay_indicator.dart'
 import 'package:hiddify/features/settings/notifier/battery_optimization/battery_optimizations_notifier.dart';
 import 'package:hiddify/features/geo/widget/geo_chip.dart';
 import 'package:hiddify/features/servers/notifier/server_prefs.dart';
+import 'package:hiddify/features/servers/notifier/server_switching.dart';
 import 'package:hiddify/features/servers/widget/ping_label.dart';
 import 'package:hiddify/features/servers/widget/server_profile_sync.dart';
 import 'package:hiddify/gen/assets.gen.dart';
@@ -34,10 +35,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// connect button and servers are greyed out and only "Войти" works, and the
 /// tunnel is forced down — a logged-out user must not stay connected.
 final homeLockedProvider = StateProvider<bool>((ref) => false);
-
-/// True while a server switch (disconnect → swap profile → reconnect) is in
-/// flight. Guards against rapid re-taps stacking reconnects (which crashed).
-final serverSwitchingProvider = StateProvider<bool>((ref) => false);
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -311,9 +308,11 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
   }
 
   Future<MyServersResult> _fetch(String accessToken) async {
-    final result = await ref
-        .read(subscriptionApiProvider)
-        .myServers(accessToken: accessToken);
+    // Capture provider objects BEFORE the await — they outlive this State, so
+    // the post-await reconcile never touches a disposed ref (M01 class).
+    final api = ref.read(subscriptionApiProvider);
+    final sync = ref.read(serverProfileSyncProvider);
+    final result = await api.myServers(accessToken: accessToken);
     final currentUrls =
         result.servers.map((s) => s.configUrl).whereType<String>().toSet();
     // The list is authoritative only with an active subscription and at least
@@ -322,9 +321,7 @@ class _MyServersSectionState extends ConsumerState<_MyServersSection> {
     final authoritative = result.subscription != null &&
         result.servers.isNotEmpty &&
         result.servers.every((s) => s.configUrl != null);
-    await ref
-        .read(serverProfileSyncProvider)
-        .reconcile(currentUrls, authoritative: authoritative);
+    await sync.reconcile(currentUrls, authoritative: authoritative);
     return result;
   }
 
@@ -573,15 +570,28 @@ class _ServerCard extends ConsumerWidget {
   // hot-swapping the profile under a live connection (which crashed the app).
   // A provider guard ignores rapid re-taps so reconnects can't stack.
   Future<void> _select(BuildContext context, WidgetRef ref) async {
-    if (ref.read(serverSwitchingProvider)) return;
+    // Capture EVERY provider object up front — this card (a ConsumerWidget) can
+    // be unmounted during the multi-second switch (e.g. a list reload), after
+    // which its `ref` throws. The captured notifiers/StateControllers/APIs
+    // outlive the widget, so try/finally and post-await work stay safe.
+    final switching = ref.read(serverSwitchingProvider.notifier);
+    if (switching.state) return;
+    final locked = ref.read(homeLockedProvider.notifier);
+    final prefs = ref.read(serverPrefsProvider.notifier);
     final awg = ref.read(serverPrefsProvider).isAwg(server.code);
     final sync = ref.read(serverProfileSyncProvider);
     final conn = ref.read(connectionNotifierProvider.notifier);
+    final subApi = ref.read(subscriptionApiProvider);
+    final auth = ref.read(authNotifierProvider);
     final messenger = ScaffoldMessenger.of(context);
-    final wasConnected =
-        ref.read(connectionNotifierProvider).valueOrNull?.isConnected ?? false;
+    // NEW-2: a connect/disconnect in flight counts as "busy" too — we must
+    // abort+wait before swapping the active profile, never hot-swap it under a
+    // live OR forming tunnel (the latter previously connected to the OLD
+    // server, or for AWG deleted the in-flight profile).
+    final st0 = conn.currentStatus;
+    final wasConnected = (st0?.isConnected ?? false) || (st0?.isSwitching ?? false);
 
-    ref.read(serverSwitchingProvider.notifier).state = true;
+    switching.state = true;
     try {
       // Pre-flight: make sure we have something to import.
       if (!awg && server.configUrl == null) {
@@ -598,7 +608,7 @@ class _ServerCard extends ConsumerWidget {
         // Audit H07: if the tunnel does NOT actually drop within the deadline
         // we MUST NOT swap the active profile under it (the whole point of
         // this guard) — abort the switch with a clear error to the user.
-        final reallyDown = await _waitDisconnected(ref);
+        final reallyDown = await _waitDisconnected(conn);
         if (!reallyDown) {
           if (!context.mounted) return;
           messenger.hideCurrentSnackBar();
@@ -608,9 +618,12 @@ class _ServerCard extends ConsumerWidget {
         }
       }
 
+      // M14: if the session locked while we were disconnecting, the lock
+      // listener already aborted the tunnel — do NOT re-import/reconnect.
+      if (locked.state) return;
+
       bool ok;
       if (awg) {
-        final auth = ref.read(authNotifierProvider);
         if (auth is! AuthAuthenticated) return;
         if (!wasConnected) {
           messenger.showSnackBar(SnackBar(
@@ -619,9 +632,8 @@ class _ServerCard extends ConsumerWidget {
           ));
         }
         try {
-          final conf = await ref
-              .read(subscriptionApiProvider)
-              .awgConfig(accessToken: auth.accessToken, slotId: server.slotId);
+          final conf = await subApi.awgConfig(
+              accessToken: auth.accessToken, slotId: server.slotId);
           ok = await sync.selectLocal(conf);
         } on SubscriptionApiException catch (e) {
           if (!context.mounted) return;
@@ -639,9 +651,12 @@ class _ServerCard extends ConsumerWidget {
         messenger.showSnackBar(const SnackBar(content: Text('Не удалось подготовить сервер')));
         return;
       }
-      await ref.read(serverPrefsProvider.notifier).setSelected(server.code);
+      // M14: re-check the lock before committing the selection / reconnect.
+      if (locked.state) return;
+      await prefs.setSelected(server.code);
       if (!context.mounted) return;
       if (wasConnected) {
+        if (locked.state) return;
         // Reconnect to the freshly-selected server (now the active profile).
         await conn.mayConnect();
         if (context.mounted) {
@@ -655,7 +670,7 @@ class _ServerCard extends ConsumerWidget {
         ));
       }
     } finally {
-      ref.read(serverSwitchingProvider.notifier).state = false;
+      switching.state = false;
     }
   }
 
@@ -663,21 +678,23 @@ class _ServerCard extends ConsumerWidget {
   /// 10s deadline. Callers MUST check the result — silently proceeding past
   /// a missed deadline would reproduce the hot-swap-under-live-tunnel crash
   /// this guard exists to prevent.
-  Future<bool> _waitDisconnected(WidgetRef ref) async {
+  Future<bool> _waitDisconnected(ConnectionNotifier conn) async {
     final deadline = DateTime.now().add(const Duration(seconds: 10));
     while (DateTime.now().isBefore(deadline)) {
-      final st = ref.read(connectionNotifierProvider).valueOrNull;
-      if (st?.isDisconnected ?? false) return true;
+      if (conn.currentStatus?.isDisconnected ?? false) return true;
       await Future<void>.delayed(const Duration(milliseconds: 300));
     }
-    final last = ref.read(connectionNotifierProvider).valueOrNull;
-    return last?.isDisconnected ?? false;
+    return conn.currentStatus?.isDisconnected ?? false;
   }
 
   Future<void> _applyProtocol(BuildContext context, WidgetRef ref, String proto) async {
-    await ref.read(serverPrefsProvider.notifier).setProtocol(server.code, proto);
-    // Re-apply immediately if this server is the active selection.
-    if (ref.read(serverPrefsProvider).selected == server.code && context.mounted) {
+    final prefs = ref.read(serverPrefsProvider.notifier);
+    await prefs.setProtocol(server.code, proto);
+    // Re-apply immediately if this server is the active selection. Check
+    // `mounted` BEFORE touching `ref` — `&&` is left-to-right, so the old order
+    // read a possibly-disposed ref first (M01 class).
+    if (context.mounted &&
+        ref.read(serverPrefsProvider).selected == server.code) {
       await _select(context, ref);
     }
   }
@@ -712,13 +729,25 @@ class _ServerCard extends ConsumerWidget {
 
     final auth = ref.read(authNotifierProvider);
     if (auth is! AuthAuthenticated) return;
+    // Capture before awaits (M01); also needed for the H08 disconnect-first.
+    final subApi = ref.read(subscriptionApiProvider);
+    final sync = ref.read(serverProfileSyncProvider);
+    final conn = ref.read(connectionNotifierProvider.notifier);
+    final isSelected = ref.read(serverPrefsProvider).selected == server.code;
     final messenger = ScaffoldMessenger.of(context);
+    // H08: if the tunnel is up (or forming) on the very server we're about to
+    // deprovision, drop it FIRST — otherwise the tunnel keeps pointing at a
+    // server that no longer exists (silent blackhole, UI stuck "Подключено").
+    final st = conn.currentStatus;
+    if (isSelected && ((st?.isConnected ?? false) || (st?.isSwitching ?? false))) {
+      await conn.abortConnection();
+      await _waitDisconnected(conn);
+      if (!context.mounted) return;
+    }
     messenger.showSnackBar(SnackBar(content: Text('Удаляем ${server.city ?? server.code}…')));
     try {
-      await ref
-          .read(subscriptionApiProvider)
-          .deleteServer(accessToken: auth.accessToken, slotId: server.slotId);
-      await ref.read(serverProfileSyncProvider).removeProfileByUrl(server.configUrl);
+      await subApi.deleteServer(accessToken: auth.accessToken, slotId: server.slotId);
+      await sync.removeProfileByUrl(server.configUrl);
       if (!context.mounted) return;
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(

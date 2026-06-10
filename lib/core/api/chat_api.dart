@@ -99,7 +99,15 @@ class ChatApi {
       final response = await _dio.post<Map<String, dynamic>>(
         '/chat/message',
         data: {'content': content},
-        options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
+        options: Options(
+          headers: {'Authorization': 'Bearer $accessToken'},
+          // The LLM reply routinely takes 20-60s; the shared Dio's 15s
+          // receiveTimeout would abort it as a "network error" while the
+          // server keeps generating (and billing) → user re-sends → double
+          // LLM charge. Give chat its own generous receive window.
+          receiveTimeout: const Duration(seconds: 90),
+          sendTimeout: const Duration(seconds: 30),
+        ),
       );
       if (response.statusCode == 200) {
         final data = response.data!;
