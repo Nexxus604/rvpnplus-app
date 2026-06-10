@@ -37,17 +37,23 @@ class ServerPrefs extends StateNotifier<ServerPrefsState> {
   SharedPreferences? _prefs;
 
   Future<void> _load() async {
-    _prefs = await SharedPreferences.getInstance();
-    final selected = _prefs!.getString(_kSelectedKey);
-    final raw = _prefs!.getString(_kProtocolKey);
-    var protocol = const <String, String>{};
+    final prefs = await SharedPreferences.getInstance();
+    _prefs = prefs;
+    if (!mounted) return;
+    final raw = prefs.getString(_kProtocolKey);
+    var persisted = const <String, String>{};
     if (raw != null && raw.isNotEmpty) {
       try {
-        protocol = (jsonDecode(raw) as Map<String, dynamic>)
+        persisted = (jsonDecode(raw) as Map<String, dynamic>)
             .map((k, v) => MapEntry(k, v.toString()));
       } catch (_) {}
     }
-    state = ServerPrefsState(selected: selected, protocol: protocol);
+    // Don't clobber a selection/protocol the user set BEFORE prefs resolved at
+    // startup: in-memory values win over the persisted snapshot.
+    state = ServerPrefsState(
+      selected: state.selected ?? prefs.getString(_kSelectedKey),
+      protocol: {...persisted, ...state.protocol},
+    );
   }
 
   Future<void> setSelected(String code) async {

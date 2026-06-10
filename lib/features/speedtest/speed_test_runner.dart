@@ -58,7 +58,6 @@ class SpeedProgress {
   final double? liveMbps; // current download rate during a measurement
   final List<ProtocolResult> results;
   final GeoInfo? fromGeo; // user's own location
-  final GeoInfo? toGeo; // VPN exit location (isp forced to R-VPN Plus)
   final String? recommendation;
   final String? note;
   const SpeedProgress({
@@ -67,7 +66,6 @@ class SpeedProgress {
     this.liveMbps,
     this.results = const [],
     this.fromGeo,
-    this.toGeo,
     this.recommendation,
     this.note,
   });
@@ -82,7 +80,6 @@ class SpeedTestRunner {
 
   final _results = <ProtocolResult>[];
   GeoInfo? _fromGeo;
-  GeoInfo? _toGeo;
   double _progress = 0;
   late void Function(SpeedProgress) _emit;
   // Captured once while the page is mounted, so the long connect/disconnect
@@ -99,7 +96,6 @@ class SpeedTestRunner {
       liveMbps: liveMbps,
       results: List.of(_results),
       fromGeo: _fromGeo,
-      toGeo: _toGeo,
       recommendation: recommendation,
       note: note,
     ));

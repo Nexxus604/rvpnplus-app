@@ -73,6 +73,12 @@ class _ServerCatalogPageState extends ConsumerState<ServerCatalogPage> {
       if (!mounted) return;
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(SnackBar(content: Text(_err(e))));
+    } catch (_) {
+      // Any other error (e.g. a TypeError from an unexpected response shape)
+      // would otherwise escape as an unhandled async error.
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(const SnackBar(content: Text('Не удалось выполнить операцию.')));
     } finally {
       if (mounted) setState(() => _pending.remove(s.code));
     }
@@ -139,6 +145,12 @@ class _ServerCatalogPageState extends ConsumerState<ServerCatalogPage> {
       if (!mounted) return;
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(SnackBar(content: Text(_err(e))));
+    } catch (_) {
+      // Any other error (e.g. a TypeError from an unexpected response shape)
+      // would otherwise escape as an unhandled async error.
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(const SnackBar(content: Text('Не удалось выполнить операцию.')));
     } finally {
       if (mounted) setState(() => _pending.remove(s.code));
     }

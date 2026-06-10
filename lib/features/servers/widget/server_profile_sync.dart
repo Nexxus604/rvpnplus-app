@@ -184,8 +184,17 @@ class ServerProfileSync {
       for (final p in await _allProfiles()) {
         if (p is! RemoteProfileEntity) continue;
         if (currentUrls.contains(p.url)) continue;
-        // Foreign → always; our orphans → only on an authoritative list.
-        if (!_looksLikeOurs(p.url) || authoritative) {
+        if (!_looksLikeOurs(p.url)) {
+          // Foreign profile — always remove, even if active (it must not stay
+          // the auto-connecting profile pointing at someone else's VPN).
+          await repo.deleteById(p.id, p.active).run();
+          removed++;
+        } else if (authoritative && !p.active) {
+          // OUR orphan — remove only on an authoritative list AND only if it's
+          // NOT the active profile, so a transient partial /servers response
+          // can't delete the profile the user is currently connected through
+          // (which would drop a working tunnel mid-use). Deliberate deletes of
+          // the active server go through the disconnect-first delete paths.
           await repo.deleteById(p.id, p.active).run();
           removed++;
         }

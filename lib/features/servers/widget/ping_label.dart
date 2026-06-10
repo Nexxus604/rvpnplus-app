@@ -40,6 +40,10 @@ class _PingLabelState extends State<PingLabel> {
   int? _ms;
   bool _loading = true;
   bool _failed = false;
+  // Bumped on each _measure; a late result from a previous host (the list
+  // reuses State by position, and tcpPing can take up to 3s) is discarded so
+  // it can't overwrite the current row's reading.
+  int _gen = 0;
 
   @override
   void initState() {
@@ -63,9 +67,10 @@ class _PingLabelState extends State<PingLabel> {
   }
 
   Future<void> _measure() async {
+    final gen = ++_gen;
     final host = widget.host;
     if (host == null || host.isEmpty) {
-      if (mounted) {
+      if (mounted && gen == _gen) {
         setState(() {
           _loading = false;
           _failed = true;
@@ -74,7 +79,7 @@ class _PingLabelState extends State<PingLabel> {
       return;
     }
     final ms = await tcpPing(host, widget.port);
-    if (!mounted) return;
+    if (!mounted || gen != _gen) return;
     setState(() {
       _loading = false;
       _failed = ms == null;
